@@ -28,13 +28,14 @@ func GetLocalIP() string {
 	return conn.LocalAddr().(*net.UDPAddr).IP.String()
 }
 
-func HandleGetDevices(w http.ResponseWriter, r *http.Request) {
-	list, err := portaudio.GetDevices()
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
+func NewDevicesHandler(state *types.AppState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		state.Mu.RLock()
+		devices := state.Devices
+		state.Mu.RUnlock()
+		list := portaudio.GetDevices(devices)
+		json.NewEncoder(w).Encode(list)
 	}
-	json.NewEncoder(w).Encode(list)
 }
 
 func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
@@ -67,13 +68,8 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 			}
 			os.MkdirAll(folder, 0755)
 			base := filepath.Join(folder, fmt.Sprintf("rec_%d", time.Now().Unix()))
-			state.FileL, _ = os.Create(base + "_L.wav")
-			state.FileR, _ = os.Create(base + "_R.wav")
-			state.FileStereo, _ = os.Create(base + "_Stereo.wav")
-
-			portaudio.WritePlaceholderHeader(state.FileL)
-			portaudio.WritePlaceholderHeader(state.FileR)
-			portaudio.WritePlaceholderHeader(state.FileStereo)
+			state.File, _ = os.Create(base + ".wav")
+			portaudio.WritePlaceholderHeader(state.File)
 
 			state.SamplesWrote = 0
 			state.IsRecording = true
@@ -81,12 +77,8 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 				state.Boost = req.Boost
 			}
 		} else if req.Action == "stop" && state.IsRecording {
-			portaudio.FinalizeWavHeader(state.FileL, 1, state.SamplesWrote, cfg.SampleRate)
-			portaudio.FinalizeWavHeader(state.FileR, 1, state.SamplesWrote, cfg.SampleRate)
-			portaudio.FinalizeWavHeader(state.FileStereo, 2, state.SamplesWrote, cfg.SampleRate)
-			state.FileL = nil
-			state.FileR = nil
-			state.FileStereo = nil
+			portaudio.FinalizeWavHeader(state.File, 2, state.SamplesWrote, cfg.SampleRate)
+			state.File = nil
 			state.IsRecording = false
 		} else if req.Action == "update" {
 			state.ChLeft = req.ChL

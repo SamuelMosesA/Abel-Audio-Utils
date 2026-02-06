@@ -6,12 +6,7 @@ import (
 	pa "github.com/gordonklaus/portaudio"
 )
 
-func GetDevices() ([]types.AudioDevice, error) {
-	devices, err := pa.Devices()
-	if err != nil {
-		return nil, err
-	}
-
+func GetDevices(devices []*pa.DeviceInfo) []types.AudioDevice {
 	var list []types.AudioDevice
 	for i, d := range devices {
 		if d.MaxInputChannels > 0 {
@@ -22,5 +17,5 @@ func GetDevices() ([]types.AudioDevice, error) {
 			})
 		}
 	}
-	return list, nil
+	return list
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"sync"
 
+	pa "github.com/gordonklaus/portaudio"
 	"github.com/gorilla/websocket"
 )
 
@@ -15,9 +16,7 @@ type AppState struct {
 	ChRight     int
 	Boost       float64
 
-	FileL        *os.File
-	FileR        *os.File
-	FileStereo   *os.File
+	File         *os.File
 	SamplesWrote int64
 
 	Clients   map[*websocket.Conn]bool
@@ -26,6 +25,9 @@ type AppState struct {
 	// Communication channels
 	RecordChan   chan []float32
 	PlaybackChan chan []float32
+
+	// Audio Devices cache
+	Devices []*pa.DeviceInfo
 }
 
 type AudioDevice struct {

@@ -6,17 +6,26 @@ import (
 	"behringerRecorder/lib/types"
 	"behringerRecorder/lib/web"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
+	"path/filepath"
 
 	pa "github.com/gordonklaus/portaudio"
 	"github.com/gorilla/websocket"
 )
 
+func PrintGreen(msg string) {
+	fmt.Printf("\033[32m%s\033[0m\n", msg)
+}
+
 func main() {
 	cfg, err := config.LoadConfig("config.yaml")
 	if err != nil {
 		log.Fatalf("Error loading config: %v", err)
+	}
+	if abs, err := filepath.Abs(cfg.StorageLocation); err == nil {
+		cfg.StorageLocation = abs
 	}
 
 	pa.Initialize()
@@ -31,15 +40,33 @@ func main() {
 		PlaybackChan: make(chan []float32, 100),
 	}
 
+	state.Devices, _ = pa.Devices()
+
 	// Start workers
 	web.StartBroadcaster(state, state.PlaybackChan)
 	portaudio.StartStorageWorker(state, state.RecordChan)
 
-	http.Handle("/", http.FileServer(http.Dir("./static")))
-	http.HandleFunc("/api/devices", web.HandleGetDevices)
+	// Static files (CSS, JS)
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
+
+	// Main Page (Template)
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		tmpl, err := template.ParseFiles(filepath.Join("static", "index.html"))
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		tmpl.Execute(w, cfg)
+	})
+
+	http.HandleFunc("/api/devices", web.NewDevicesHandler(state))
 	http.HandleFunc("/api", web.NewControlHandler(state, cfg))
 	http.HandleFunc("/ws", web.NewWSHandler(state))
 
-	fmt.Printf("UI: http://%s:%s\n", web.GetLocalIP(), cfg.Port)
+	PrintGreen(fmt.Sprintf("UI: http://%s:%s", web.GetLocalIP(), cfg.Port))
 	log.Fatal(http.ListenAndServe("0.0.0.0:"+cfg.Port, nil))
 }

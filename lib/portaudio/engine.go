@@ -22,7 +22,8 @@ func StartAudioEngine(state *types.AppState, cfg *config.Config, deviceID int, r
 	state.IsRunning = true
 	state.Mu.Unlock()
 
-	devices, _ := pa.Devices()
+	devices := state.Devices
+
 	if deviceID >= len(devices) {
 		return fmt.Errorf("invalid device")
 	}
@@ -46,6 +47,12 @@ func StartAudioEngine(state *types.AppState, cfg *config.Config, deviceID int, r
 		defer stream.Stop()
 		defer stream.Close()
 
+		chL, chR := state.ChLeft, state.ChRight
+		boost := float32(state.Boost)
+		if boost == 0 {
+			boost = 1.0
+		}
+
 		for {
 			select {
 			case <-quit:
@@ -56,14 +63,6 @@ func StartAudioEngine(state *types.AppState, cfg *config.Config, deviceID int, r
 			if err := stream.Read(); err != nil {
 				continue
 			}
-
-			state.Mu.RLock()
-			chL, chR := state.ChLeft, state.ChRight
-			boost := float32(state.Boost)
-			if boost == 0 {
-				boost = 1.0
-			}
-			state.Mu.RUnlock()
 
 			stereoChunk := make([]float32, cfg.BufferSize*2)
 			for i := 0; i < cfg.BufferSize; i++ {

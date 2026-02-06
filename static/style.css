@@ -145,6 +145,25 @@ button:disabled {
     border-radius: 6px;
 }
 
+.info-row {
+    font-size: 0.85rem;
+    color: #888;
+    background: #111;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #333;
+}
+
+.info-row strong {
+    color: #aaa;
+    margin-right: 5px;
+}
+
+#storagePath {
+    color: #4caf50;
+    font-family: monospace;
+}
+
 .recording-active {
     color: #ff5252 !important;
     border: 1px solid #d32f2f;

@@ -1,15 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>X32 Recorder</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
+
 <body>
     <div class="container">
         <h1>X32 Recorder</h1>
-        
+
         <div class="card connection">
             <h3>Select Audio Interface</h3>
             <div class="row">
@@ -26,12 +28,14 @@
                 <label>Left Ch <input type="number" id="chL" value="0"></label>
                 <label>Right Ch <input type="number" id="chR" value="1"></label>
             </div>
-            <label>Gain Boost 
+            <label>Gain Boost
                 <input type="number" id="boost" step="0.1" value="1.0">
             </label>
-            <button onclick="updateConfig()" class="btn-secondary">Update Config</button>
+            <button id="btnUpdateConfig" onclick="updateConfig()" class="btn-secondary">Update Config</button>
             <br><br>
-            <label class="full-width">Folder <input type="text" id="folder" value="recordings"></label>
+            <div class="info-row">
+                <strong>Recording Location:</strong> <span id="storagePath">{{.StorageLocation}}</span>
+            </div>
         </div>
 
         <div class="card control">
@@ -41,11 +45,15 @@
 
             <div class="monitor-container">
                 <div class="meter-label">L</div>
-                <div class="meter-box"><div id="meterL" class="meter-bar"></div></div>
+                <div class="meter-box">
+                    <div id="meterL" class="meter-bar"></div>
+                </div>
             </div>
             <div class="monitor-container">
                 <div class="meter-label">R</div>
-                <div class="meter-box"><div id="meterR" class="meter-bar"></div></div>
+                <div class="meter-box">
+                    <div id="meterR" class="meter-bar"></div>
+                </div>
             </div>
 
             <label class="monitor-toggle">
@@ -53,6 +61,7 @@
             </label>
         </div>
     </div>
-    <script src="app.js"></script>
+    <script src="/static/app.js"></script>
 </body>
+
 </html>

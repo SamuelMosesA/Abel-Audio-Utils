@@ -7,7 +7,7 @@ let nextStartTime = 0;
 const LATENCY_BUFFER = 0.1; // 100ms for smooth play
 
 // Visual Physics
-let targetL=0, targetR=0, currentL=0, currentR=0;
+let targetL = 0, targetR = 0, currentL = 0, currentR = 0;
 const DECAY = 0.25;
 
 // 1. Fetch Devices
@@ -23,7 +23,7 @@ window.onload = async () => {
             opt.innerText = `[${d.id}] ${d.name} (${d.inputs} in)`;
             sel.appendChild(opt);
         });
-    } catch(e) {
+    } catch (e) {
         document.getElementById("deviceSelect").innerHTML = "<option>Error loading devices</option>";
     }
     connectWebSocket();
@@ -42,7 +42,7 @@ async function connectDevice() {
         document.getElementById("btnRec").disabled = false;
         document.getElementById("monitorToggle").disabled = false;
         document.getElementById("status").innerText = "Status: Engine Running";
-    } catch(e) {
+    } catch (e) {
         btn.innerText = "Failed";
         alert("Error starting engine");
     }
@@ -56,12 +56,12 @@ function connectWebSocket() {
 
     ws.onmessage = (event) => {
         const dv = new DataView(event.data);
-        
+
         // A. Meters (Bytes 0-7)
         const rL = dv.getFloat32(0, true);
         const rR = dv.getFloat32(4, true);
-        targetL = Math.min(Math.sqrt(rL)*100, 100);
-        targetR = Math.min(Math.sqrt(rR)*100, 100);
+        targetL = Math.min(Math.sqrt(rL) * 100, 100);
+        targetR = Math.min(Math.sqrt(rR) * 100, 100);
 
         // B. Audio (Bytes 8+)
         if (document.getElementById("monitorToggle").checked && audioCtx) {
@@ -70,7 +70,7 @@ function connectWebSocket() {
             nextStartTime = 0;
         }
     };
-    
+
     ws.onclose = () => setTimeout(connectWebSocket, 2000);
 }
 
@@ -80,7 +80,7 @@ function scheduleAudio(dataView, offset) {
 
     // Copy data to avoid memory leaks
     const floatData = new Float32Array(dataView.buffer.slice(offset));
-    
+
     // Create Audio Buffer
     const buffer = audioCtx.createBuffer(2, floatData.length / 2, 48000);
     const chL = buffer.getChannelData(0);
@@ -93,7 +93,7 @@ function scheduleAudio(dataView, offset) {
     }
 
     const now = audioCtx.currentTime;
-    
+
     // If lagging or drifting, snap to now
     if (nextStartTime < now || nextStartTime > now + 1.0) {
         nextStartTime = now + LATENCY_BUFFER;
@@ -120,11 +120,11 @@ document.getElementById("monitorToggle").addEventListener('change', async (e) =>
 function draw() {
     currentL -= (currentL - targetL) * DECAY;
     currentR -= (currentR - targetR) * DECAY;
-    if(currentL < 0) currentL = 0; if(currentR < 0) currentR = 0;
-    
+    if (currentL < 0) currentL = 0; if (currentR < 0) currentR = 0;
+
     const bL = document.getElementById("meterL");
     const bR = document.getElementById("meterR");
-    if(bL && bR) {
+    if (bL && bR) {
         bL.style.width = currentL + "%";
         bR.style.width = currentR + "%";
         bL.style.background = currentL > 95 ? "#ff5252" : "#4caf50";
@@ -137,10 +137,9 @@ requestAnimationFrame(draw);
 // 6. Config Controls
 async function toggleRec() {
     const action = isRecording ? "stop" : "start";
-    const folder = document.getElementById("folder").value;
     const boost = parseFloat(document.getElementById("boost").value);
-    
-    await fetch("/api", { method: "POST", body: JSON.stringify({ action, folder, Boost: boost }) });
+
+    await fetch("/api", { method: "POST", body: JSON.stringify({ action, Boost: boost }) });
     isRecording = !isRecording;
     updateUI();
 }
@@ -155,9 +154,15 @@ async function updateConfig() {
 function updateUI() {
     const btn = document.getElementById("btnRec");
     const stat = document.getElementById("status");
-    if(isRecording) {
+
+    // Disable inputs during recording
+    document.getElementById("btnUpdateConfig").disabled = isRecording;
+    document.getElementById("deviceSelect").disabled = isRecording;
+    document.getElementById("btnConnect").disabled = isRecording;
+
+    if (isRecording) {
         btn.innerText = "Stop Recording";
-        btn.className = "btn-stop"; // Corrected from classList manipulation
+        btn.className = "btn-stop";
         stat.innerText = "● RECORDING";
         stat.classList.add("recording-active");
     } else {

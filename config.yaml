@@ -1,0 +1,11 @@
+# Behringer Audio Recorder Configuration
+
+# Server settings
+port: "8080"
+
+# Audio settings
+sample_rate: 48000
+buffer_size: 1024
+
+# Storage settings
+storage_location: "./recordings"

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X32 Recorder</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>X32 Recorder</h1>
+        
+        <div class="card connection">
+            <h3>Select Audio Interface</h3>
+            <div class="row">
+                <select id="deviceSelect" class="full-width">
+                    <option>Loading...</option>
+                </select>
+            </div>
+            <button id="btnConnect" onclick="connectDevice()" class="btn-secondary">Connect Device</button>
+        </div>
+
+        <div class="card config">
+            <h3>Configuration</h3>
+            <div class="row">
+                <label>Left Ch <input type="number" id="chL" value="0"></label>
+                <label>Right Ch <input type="number" id="chR" value="1"></label>
+            </div>
+            <label>Gain Boost 
+                <input type="number" id="boost" step="0.1" value="1.0">
+            </label>
+            <button onclick="updateConfig()" class="btn-secondary">Update Config</button>
+            <br><br>
+            <label class="full-width">Folder <input type="text" id="folder" value="recordings"></label>
+        </div>
+
+        <div class="card control">
+            <h3>Transport</h3>
+            <div id="status">Disconnected</div>
+            <button id="btnRec" class="btn-rec" onclick="toggleRec()" disabled>Start Recording</button>
+
+            <div class="monitor-container">
+                <div class="meter-label">L</div>
+                <div class="meter-box"><div id="meterL" class="meter-bar"></div></div>
+            </div>
+            <div class="monitor-container">
+                <div class="meter-label">R</div>
+                <div class="meter-box"><div id="meterR" class="meter-bar"></div></div>
+            </div>
+
+            <label class="monitor-toggle">
+                <input type="checkbox" id="monitorToggle" disabled> Listen Live (Low Latency)
+            </label>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

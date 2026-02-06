@@ -1,0 +1,89 @@
+import { audioState, type MeterState } from "./audioState.svelte";
+
+class AudioVisuals {
+    currentMeters = $state<MeterState>({ L: 0, R: 0 });
+    monitoring = $state(false);
+
+    #targetMeters: MeterState = { L: 0, R: 0 };
+    #audioCtx: AudioContext | null = null;
+    #nextStartTime = 0;
+    #LATENCY_BUFFER = 0.1;
+    #DECAY = 0.25;
+
+    constructor() {
+        audioState.onMessage = (dv) => this.processData(dv);
+        this.runVisualLoop();
+    }
+
+    processData(dv: DataView) {
+        const rL = dv.getFloat32(0, true);
+        const rR = dv.getFloat32(4, true);
+
+        this.#targetMeters.L = Math.min(Math.sqrt(rL) * 100, 100);
+        this.#targetMeters.R = Math.min(Math.sqrt(rR) * 100, 100);
+
+        if (this.monitoring && this.#audioCtx) {
+            this.scheduleAudio(dv, 8);
+        } else {
+            this.#nextStartTime = 0;
+        }
+    }
+
+    scheduleAudio(dataView: DataView, offset: number) {
+        if (!this.#audioCtx) return;
+        if (this.#audioCtx.state === 'suspended') this.#audioCtx.resume();
+
+        const floatData = new Float32Array(dataView.buffer.slice(offset));
+        const buffer = this.#audioCtx.createBuffer(2, floatData.length / 2, 48000);
+        const chL = buffer.getChannelData(0);
+        const chR = buffer.getChannelData(1);
+
+        for (let i = 0; i < floatData.length / 2; i++) {
+            chL[i] = floatData[i * 2];
+            chR[i] = floatData[i * 2 + 1];
+        }
+
+        const now = this.#audioCtx.currentTime;
+        if (this.#nextStartTime < now || this.#nextStartTime > now + 1.0) {
+            this.#nextStartTime = now + this.#LATENCY_BUFFER;
+        }
+
+        const source = this.#audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.#audioCtx.destination);
+        source.start(this.#nextStartTime);
+        this.#nextStartTime += buffer.duration;
+    }
+
+    async toggleMonitor() {
+        if (this.monitoring) {
+            if (this.#audioCtx) this.#audioCtx.suspend();
+            this.monitoring = false;
+        } else {
+            if (!this.#audioCtx) {
+                const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+                this.#audioCtx = new AudioContextClass({
+                    latencyHint: 'interactive',
+                    sampleRate: 48000
+                });
+            }
+            await this.#audioCtx!.resume();
+            this.monitoring = true;
+        }
+    }
+
+    runVisualLoop() {
+        const tick = () => {
+            this.currentMeters.L -= (this.currentMeters.L - this.#targetMeters.L) * this.#DECAY;
+            this.currentMeters.R -= (this.currentMeters.R - this.#targetMeters.R) * this.#DECAY;
+
+            if (this.currentMeters.L < 0.1) this.currentMeters.L = 0;
+            if (this.currentMeters.R < 0.1) this.currentMeters.R = 0;
+
+            requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    }
+}
+
+export const audioVisuals = new AudioVisuals();

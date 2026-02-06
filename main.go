@@ -46,25 +46,25 @@ func main() {
 	web.StartBroadcaster(state, state.PlaybackChan)
 	portaudio.StartStorageWorker(state, state.RecordChan)
 
-	// Static files (CSS, JS)
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
+	tmpl := template.Must(template.ParseFiles("static/index.html"))
 
-	// Main Page (Template)
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	http.Handle("/assets/", http.FileServer(http.Dir("static"))) // Vite assets are in static/assets
+	http.HandleFunc("/vite.svg", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/vite.svg")
+	})
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		tmpl, err := template.ParseFiles(filepath.Join("static", "index.html"))
-		if err != nil {
-			http.Error(w, err.Error(), 500)
+			http.FileServer(http.Dir("static")).ServeHTTP(w, r)
 			return
 		}
 		tmpl.Execute(w, cfg)
 	})
 
 	http.HandleFunc("/api/devices", web.NewDevicesHandler(state))
-	http.HandleFunc("/api", web.NewControlHandler(state, cfg))
+	http.HandleFunc("/api/status", web.NewStatusHandler(state))
+	http.HandleFunc("/api/control", web.NewControlHandler(state, cfg))
 	http.HandleFunc("/ws", web.NewWSHandler(state))
 
 	PrintGreen(fmt.Sprintf("UI: http://%s:%s", web.GetLocalIP(), cfg.Port))

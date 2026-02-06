@@ -30,6 +30,7 @@ func GetLocalIP() string {
 
 func NewDevicesHandler(state *types.AppState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("API: Device list requested")
 		state.Mu.RLock()
 		devices := state.Devices
 		state.Mu.RUnlock()
@@ -85,6 +86,27 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 			state.ChRight = req.ChR
 			state.Boost = req.Boost
 		}
+	}
+}
+
+func NewStatusHandler(state *types.AppState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		state.Mu.RLock()
+		defer state.Mu.RUnlock()
+		status := struct {
+			IsRunning   bool    `json:"isRunning"`
+			IsRecording bool    `json:"isRecording"`
+			ChL         int     `json:"chL"`
+			ChR         int     `json:"chR"`
+			Boost       float64 `json:"boost"`
+		}{
+			IsRunning:   state.IsRunning,
+			IsRecording: state.IsRecording,
+			ChL:         state.ChLeft,
+			ChR:         state.ChRight,
+			Boost:       state.Boost,
+		}
+		json.NewEncoder(w).Encode(status)
 	}
 }
 

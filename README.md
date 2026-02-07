@@ -50,6 +50,7 @@ A high-performance web-based audio recording interface designed for Behringer U-
 
 2. **Access the UI**:
    Open your browser and navigate to `http://localhost:8080` (or your configured port).
+   For the network port, use the IP address published in the logs
 
 3. **Select Device**:
    Choose your audio interface from the device list and click **Connect**.

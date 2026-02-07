@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 
 	pa "github.com/gordonklaus/portaudio"
-	"github.com/gorilla/websocket"
 )
 
 func PrintGreen(msg string) {
@@ -43,12 +42,14 @@ func main() {
 	defer pa.Terminate()
 
 	state := &types.AppState{
-		Clients:      make(map[*websocket.Conn]bool),
-		ChLeft:       cfg.DefaultChL,
-		ChRight:      cfg.DefaultChR,
-		Boost:        cfg.DefaultBoost,
-		RecordChan:   make(chan []float32, 100),
-		PlaybackChan: make(chan []float32, 100),
+		Clients:            make(map[*types.WSClient]bool),
+		ChLeft:             cfg.DefaultChL,
+		ChRight:            cfg.DefaultChR,
+		Boost:              cfg.DefaultBoost,
+		RecordChan:         make(chan []float32, 100),
+		PlaybackChan:       make(chan []float32, 100),
+		StorageLocation:    cfg.StorageLocation,
+		CloudDriveLocation: cfg.CloudDriveLocation,
 	}
 
 	state.Devices, _ = pa.Devices()

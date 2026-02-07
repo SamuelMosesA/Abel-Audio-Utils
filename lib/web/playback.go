@@ -84,11 +84,11 @@ func StartAudioBroadcaster(state *types.AppState, playbackChan <-chan []float32)
 			}
 
 			for c := range state.Clients {
-				c.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+				c.Conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
 				if err := c.WriteMessage(websocket.BinaryMessage, packetBuf); err != nil {
 					c.Close()
-					// We can't delete here while RLock holds, but the original code did it with Lock.
-					// I'll need to upgrade to Lock or handle it separately.
+					// We can't delete here while RLock holds.
+					// The handler loop in server.go handles cleanup on error/close.
 				}
 			}
 			state.Mu.RUnlock()

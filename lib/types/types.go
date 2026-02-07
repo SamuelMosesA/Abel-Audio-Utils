@@ -20,16 +20,41 @@ type AppState struct {
 	File         *os.File
 	SamplesWrote int64
 
-	Clients       map[*websocket.Conn]bool
-	PrimaryClient *websocket.Conn // Client with primary control
+	Clients       map[*WSClient]bool
+	PrimaryClient *WSClient // Client with primary control
 	QuitAudio     chan bool
 
 	// Communication channels
 	RecordChan   chan []float32
 	PlaybackChan chan []float32
 
+	StorageLocation    string
+	CloudDriveLocation string
+
 	// Audio Devices cache
 	Devices []*pa.DeviceInfo
+}
+
+// WSClient wraps a websocket connection with a mutex for thread-safe writes.
+type WSClient struct {
+	Conn *websocket.Conn
+	Mu   sync.Mutex
+}
+
+func (c *WSClient) WriteJSON(v interface{}) error {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	return c.Conn.WriteJSON(v)
+}
+
+func (c *WSClient) WriteMessage(messageType int, data []byte) error {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	return c.Conn.WriteMessage(messageType, data)
+}
+
+func (c *WSClient) Close() error {
+	return c.Conn.Close()
 }
 
 type AudioDevice struct {

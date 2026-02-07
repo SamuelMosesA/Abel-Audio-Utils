@@ -270,11 +270,11 @@
                         <div class="flex flex-col items-center md:items-end gap-2 text-right">
                             <div class="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
                                 <span class="bg-slate-800 px-1.5 py-0.5 rounded text-indigo-400">STORAGE</span>
-                                {fileState.storageLocation}
+                                {audioState.storageLocation}
                             </div>
                             <div class="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
                                 <span class="bg-slate-800 px-1.5 py-0.5 rounded text-amber-500">CLOUD</span>
-                                {fileState.cloudDriveLocation}
+                                {audioState.cloudDriveLocation}
                             </div>
                         </div>
                     </div>

@@ -194,8 +194,8 @@ func NewStatusHandler(state *types.AppState, cfg *config.Config) http.HandlerFun
 			ChR:                state.ChRight,
 			Boost:              state.Boost,
 			DeviceId:           state.DeviceID,
-			StorageLocation:    cfg.StorageLocation,
-			CloudDriveLocation: cfg.CloudDriveLocation,
+			StorageLocation:    state.StorageLocation,
+			CloudDriveLocation: state.CloudDriveLocation,
 		}
 		json.NewEncoder(w).Encode(status)
 	}
@@ -283,34 +283,37 @@ func NewWSHandler(state *types.AppState) http.HandlerFunc {
 		if err != nil {
 			return
 		}
+
+		wsClient := &types.WSClient{Conn: conn}
+
 		state.Mu.Lock()
-		state.Clients[conn] = true
+		state.Clients[wsClient] = true
 		clientCount := len(state.Clients)
 		// First client becomes primary, or if only 1 client ensure it's primary
 		if state.PrimaryClient == nil || clientCount == 1 {
-			state.PrimaryClient = conn
+			state.PrimaryClient = wsClient
 			state.Mu.Unlock()
-			fmt.Printf("[CLIENT] New client connected (ID: %p) - Assigned as PRIMARY. Total clients: %d\n", conn, clientCount)
+			fmt.Printf("[CLIENT] New client connected (ID: %p) - Assigned as PRIMARY. Total clients: %d\n", wsClient, clientCount)
 		} else {
 			state.Mu.Unlock()
-			fmt.Printf("[CLIENT] New client connected (ID: %p) - Secondary. Total clients: %d\n", conn, clientCount)
+			fmt.Printf("[CLIENT] New client connected (ID: %p) - Secondary. Total clients: %d\n", wsClient, clientCount)
 		}
 
 		// Send initial state to newly connected client
-		sendConfigStateUpdate(conn, state)
+		sendConfigStateUpdate(wsClient, state)
 		broadcastStateUpdate(state)
 
 		// Listen for client messages
 		go func() {
 			for {
-				_, data, err := conn.ReadMessage()
+				_, data, err := wsClient.Conn.ReadMessage()
 				if err != nil {
 					// Client disconnected
 					state.Mu.Lock()
-					delete(state.Clients, conn)
+					delete(state.Clients, wsClient)
 					clientCount := len(state.Clients)
 					// If primary client disconnected, assign new primary
-					if state.PrimaryClient == conn {
+					if state.PrimaryClient == wsClient {
 						state.PrimaryClient = nil
 						// Assign first available client as primary
 						for c := range state.Clients {
@@ -319,14 +322,14 @@ func NewWSHandler(state *types.AppState) http.HandlerFunc {
 						}
 						if state.PrimaryClient != nil {
 							state.Mu.Unlock()
-							fmt.Printf("[CLIENT] Primary client disconnected (ID: %p). Assigned new PRIMARY (ID: %p). Remaining clients: %d\n", conn, state.PrimaryClient, clientCount)
+							fmt.Printf("[CLIENT] Primary client disconnected (ID: %p). Assigned new PRIMARY (ID: %p). Remaining clients: %d\n", wsClient, state.PrimaryClient, clientCount)
 						} else {
 							state.Mu.Unlock()
-							fmt.Printf("[CLIENT] Primary client disconnected (ID: %p). No clients remaining\n", conn)
+							fmt.Printf("[CLIENT] Primary client disconnected (ID: %p). No clients remaining\n", wsClient)
 						}
 					} else {
 						state.Mu.Unlock()
-						fmt.Printf("[CLIENT] Secondary client disconnected (ID: %p). Remaining clients: %d\n", conn, clientCount)
+						fmt.Printf("[CLIENT] Secondary client disconnected (ID: %p). Remaining clients: %d\n", wsClient, clientCount)
 					}
 					// If only 1 client remains, ensure it's primary
 					if clientCount == 1 && state.PrimaryClient == nil {
@@ -337,7 +340,7 @@ func NewWSHandler(state *types.AppState) http.HandlerFunc {
 						}
 						state.Mu.Unlock()
 					}
-					conn.Close()
+					wsClient.Close()
 					// Notify remaining clients of primary change
 					broadcastStateUpdate(state)
 					return
@@ -355,12 +358,12 @@ func NewWSHandler(state *types.AppState) http.HandlerFunc {
 					// Secondary client requesting primary - disconnect old primary and promote requester
 					state.Mu.Lock()
 					oldPrimary := state.PrimaryClient
-					state.PrimaryClient = conn
+					state.PrimaryClient = wsClient
 					state.Mu.Unlock()
 
 					// Disconnect the old primary client
-					if oldPrimary != nil && oldPrimary != conn {
-						fmt.Printf("[PRIMARY] Client %p requested primary control. Disconnecting old PRIMARY %p\n", conn, oldPrimary)
+					if oldPrimary != nil && oldPrimary != wsClient {
+						fmt.Printf("[PRIMARY] Client %p requested primary control. Disconnecting old PRIMARY %p\n", wsClient, oldPrimary)
 						oldPrimary.Close()
 						state.Mu.Lock()
 						delete(state.Clients, oldPrimary)
@@ -368,7 +371,7 @@ func NewWSHandler(state *types.AppState) http.HandlerFunc {
 					}
 
 					// Notify all clients of the change
-					fmt.Printf("[PRIMARY] New PRIMARY assigned: %p\n", conn)
+					fmt.Printf("[PRIMARY] New PRIMARY assigned: %p\n", wsClient)
 					broadcastStateUpdate(state)
 				}
 			}
@@ -378,31 +381,35 @@ func NewWSHandler(state *types.AppState) http.HandlerFunc {
 
 // sendConfigStateUpdate sends the current engine state to a single client.
 // Must be called while holding the state mutex to prevent concurrent writes.
-func sendConfigStateUpdate(conn *websocket.Conn, state *types.AppState) {
+func sendConfigStateUpdate(ws *types.WSClient, state *types.AppState) {
 	state.Mu.RLock()
 	initialState := struct {
-		Type        string  `json:"type"`
-		IsRunning   bool    `json:"isRunning"`
-		IsRecording bool    `json:"isRecording"`
-		IsPrimary   bool    `json:"isPrimary"`
-		DeviceID    int     `json:"deviceId"`
-		ChL         int     `json:"chL"`
-		ChR         int     `json:"chR"`
-		Boost       float64 `json:"boost"`
+		Type               string  `json:"type"`
+		IsRunning          bool    `json:"isRunning"`
+		IsRecording        bool    `json:"isRecording"`
+		IsPrimary          bool    `json:"isPrimary"`
+		DeviceID           int     `json:"deviceId"`
+		ChL                int     `json:"chL"`
+		ChR                int     `json:"chR"`
+		Boost              float64 `json:"boost"`
+		StorageLocation    string  `json:"storageLocation"`
+		CloudDriveLocation string  `json:"cloudDriveLocation"`
 	}{
-		Type:        "state",
-		IsRunning:   state.IsRunning,
-		IsRecording: state.IsRecording,
-		IsPrimary:   state.PrimaryClient == conn,
-		DeviceID:    state.DeviceID,
-		ChL:         state.ChLeft,
-		ChR:         state.ChRight,
-		Boost:       state.Boost,
+		Type:               "state",
+		IsRunning:          state.IsRunning,
+		IsRecording:        state.IsRecording,
+		IsPrimary:          state.PrimaryClient == ws,
+		DeviceID:           state.DeviceID,
+		ChL:                state.ChLeft,
+		ChR:                state.ChRight,
+		Boost:              state.Boost,
+		StorageLocation:    state.StorageLocation,
+		CloudDriveLocation: state.CloudDriveLocation,
 	}
 	state.Mu.RUnlock()
 
-	conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-	conn.WriteJSON(initialState)
+	ws.Conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+	ws.WriteJSON(initialState)
 }
 
 // broadcastStateUpdate sends the current engine state to all connected clients.

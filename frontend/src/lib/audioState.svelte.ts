@@ -16,6 +16,8 @@ export interface AppStatus {
     chL: number;
     chR: number;
     boost: number;
+    storageLocation: string;
+    cloudDriveLocation: string;
 }
 
 class AudioState {
@@ -28,6 +30,8 @@ class AudioState {
     chL = $state(0);
     chR = $state(0);
     boost = $state(0);
+    storageLocation = $state("");
+    cloudDriveLocation = $state("");
 
     #ws: WebSocket | null = null;
     onMessage: ((dv: DataView) => void) | null = null;
@@ -57,6 +61,8 @@ class AudioState {
             this.chR = status.chR;
             this.boost = status.boost;
             this.selectedDeviceId = status.deviceId;
+            this.storageLocation = status.storageLocation;
+            this.cloudDriveLocation = status.cloudDriveLocation;
         } catch (e) {
             console.error("Error syncing status", e);
         }
@@ -95,7 +101,9 @@ class AudioState {
                 //   "deviceId": int,
                 //   "chL": int,
                 //   "chR": int,
-                //   "boost": float64
+                //   "boost": float64,
+                //   "storageLocation": string,
+                //   "cloudDriveLocation": string
                 // }
                 try {
                     const message = JSON.parse(event.data);
@@ -108,6 +116,8 @@ class AudioState {
                         this.chL = message.chL;
                         this.chR = message.chR;
                         this.boost = message.boost;
+                        this.storageLocation = message.storageLocation;
+                        this.cloudDriveLocation = message.cloudDriveLocation;
 
                         // Log recording state changes
                         if (oldIsRecording !== message.isRecording) {

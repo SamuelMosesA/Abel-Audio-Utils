@@ -57,9 +57,14 @@ class AudioVisuals {
 
     async toggleMonitor() {
         if (this.monitoring) {
-            if (this.#audioCtx) this.#audioCtx.suspend();
+            // Disable monitoring
             this.monitoring = false;
+            if (this.#audioCtx && this.#audioCtx.state !== 'closed') {
+                await this.#audioCtx.suspend();
+            }
+            this.#nextStartTime = 0;
         } else {
+            // Enable monitoring
             if (!this.#audioCtx) {
                 const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
                 this.#audioCtx = new AudioContextClass({
@@ -67,7 +72,9 @@ class AudioVisuals {
                     sampleRate: 48000
                 });
             }
-            await this.#audioCtx!.resume();
+            if (this.#audioCtx.state === 'suspended') {
+                await this.#audioCtx.resume();
+            }
             this.monitoring = true;
         }
     }

@@ -12,6 +12,7 @@ export interface MeterState {
 export interface AppStatus {
     isRunning: boolean;
     isRecording: boolean;
+    deviceId: number;
     chL: number;
     chR: number;
     boost: number;
@@ -21,7 +22,12 @@ class AudioState {
     isRunning = $state(false);
     isRecording = $state(false);
     wsConnected = $state(false);
+    isPrimary = $state(false);
     devices = $state<Device[]>([]);
+    selectedDeviceId = $state(0);
+    chL = $state(0);
+    chR = $state(0);
+    boost = $state(0);
     storageLocation = $state("");
 
     #ws: WebSocket | null = null;
@@ -29,7 +35,6 @@ class AudioState {
 
     constructor() {
         this.fetchDevices();
-        this.syncStatus();
         this.connectWebSocket();
     }
 
@@ -65,9 +70,52 @@ class AudioState {
         };
 
         this.#ws.onmessage = (event: MessageEvent) => {
-            if (this.onMessage) {
-                const dv = new DataView(event.data as ArrayBuffer);
-                this.onMessage(dv);
+            // Handle both state updates and audio data
+            if (event.data instanceof ArrayBuffer) {
+                // Audio data - Binary Protocol Format (Little Endian):
+                //   Offset  Size  Field       Type      Description
+                //   ------  ----  -----       ----      -----------
+                //   0       4     maxL        float32   Peak level for left channel [0.0 to 1.0]
+                //   4       4     maxR        float32   Peak level for right channel [0.0 to 1.0]
+                //   8+      4*N   audioData   float32[] Stereo audio samples, interleaved [L, R, L, R, ...]
+                if (this.onMessage) {
+                    const dv = new DataView(event.data as ArrayBuffer);
+                    this.onMessage(dv);
+                }
+            } else {
+                // State update - JSON format:
+                // {
+                //   "type": "state",
+                //   "isRunning": bool,
+                //   "isRecording": bool,
+                //   "isPrimary": bool,
+                //   "deviceId": int,
+                //   "chL": int,
+                //   "chR": int,
+                //   "boost": float64
+                // }
+                try {
+                    const message = JSON.parse(event.data);
+                    if (message.type === "state") {
+                        const oldIsRecording = this.isRecording;
+                        this.isRunning = message.isRunning;
+                        this.isRecording = message.isRecording;
+                        this.isPrimary = message.isPrimary;
+                        this.selectedDeviceId = message.deviceId;
+                        this.chL = message.chL;
+                        this.chR = message.chR;
+                        this.boost = message.boost;
+                        
+                        // Log recording state changes
+                        if (oldIsRecording !== message.isRecording) {
+                            console.log(`[STATE] Recording changed: ${oldIsRecording} -> ${message.isRecording}`);
+                        }
+                    } else {
+                        console.warn(`[STATE] Unknown message type: ${message.type}`);
+                    }
+                } catch (e) {
+                    console.error("Failed to parse message:", e, event.data);
+                }
             }
         };
 
@@ -81,6 +129,12 @@ class AudioState {
             console.error("WebSocket error:", e);
             this.wsConnected = false;
         };
+    }
+
+    requestPrimaryControl() {
+        if (this.#ws && this.#ws.readyState === WebSocket.OPEN) {
+            this.#ws.send(JSON.stringify({ type: "requestPrimary" }));
+        }
     }
 }
 

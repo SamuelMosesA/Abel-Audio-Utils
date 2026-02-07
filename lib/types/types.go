@@ -12,6 +12,7 @@ type AppState struct {
 	Mu          sync.RWMutex
 	IsRecording bool
 	IsRunning   bool // Engine status
+	DeviceID    int  // Currently connected device ID
 	ChLeft      int
 	ChRight     int
 	Boost       float64
@@ -19,8 +20,9 @@ type AppState struct {
 	File         *os.File
 	SamplesWrote int64
 
-	Clients   map[*websocket.Conn]bool
-	QuitAudio chan bool
+	Clients       map[*websocket.Conn]bool
+	PrimaryClient *websocket.Conn // Client with primary control
+	QuitAudio     chan bool
 
 	// Communication channels
 	RecordChan   chan []float32

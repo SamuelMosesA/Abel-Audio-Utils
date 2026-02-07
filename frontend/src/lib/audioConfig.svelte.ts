@@ -16,6 +16,7 @@ class AudioConfig {
             this.chLeft = status.chL;
             this.chRight = status.chR;
             this.boost = status.boost;
+            audioState.selectedDeviceId = status.deviceId;
         } catch (e) {
             console.error("Error syncing config", e);
         }
@@ -49,7 +50,7 @@ class AudioConfig {
                     Boost: parseFloat(this.boost.toString())
                 })
             });
-            audioState.isRecording = !audioState.isRecording;
+            // Don't update state here - let the WebSocket state update handle it
         } catch (e) {
             console.error("Failed to toggle recording", e);
         }

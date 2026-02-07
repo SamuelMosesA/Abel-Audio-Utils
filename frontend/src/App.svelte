@@ -13,10 +13,19 @@
     import { cn } from "$lib/utils";
 
     let selectedDeviceValue = $state<string | undefined>(undefined);
-    
-    // Logging for debug
+
+    // Sync device selection both ways
     $effect(() => {
-        console.log("selectedDeviceValue changed:", selectedDeviceValue);
+        if (audioState.selectedDeviceId > 0) {
+            selectedDeviceValue = audioState.selectedDeviceId.toString();
+        }
+    });
+
+    // Trigger connect when user selects a device
+    $effect(() => {
+        if (selectedDeviceValue && selectedDeviceValue !== audioState.selectedDeviceId.toString()) {
+            handleConnect();
+        }
     });
 
     onMount(() => {
@@ -42,8 +51,8 @@
         await audioConfig.updateConfig();
     };
 
-    const handleMonitorToggle = async () => {
-        await audioVisuals.toggleMonitor();
+    const handleMonitorToggle = () => {
+        audioVisuals.toggleMonitor();
     };
 
 </script>
@@ -98,17 +107,27 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             
             <!-- Connection Card -->
-            <Card.Root class="bg-slate-900/40 border-slate-800 backdrop-blur-xl shadow-2xl overflow-hidden group">
+            <Card.Root class={cn(
+                "bg-slate-900/40 border-slate-800 backdrop-blur-xl shadow-2xl overflow-hidden group",
+                !audioState.isPrimary && "opacity-50 pointer-events-none"
+            )}>
                 <Card.Header>
-                    <Card.Title class="flex items-center gap-2 text-slate-300">
-                        <Radio class="w-4 h-4 text-indigo-400" />
-                        Audio Interface
+                    <Card.Title class="flex items-center justify-between text-slate-300">
+                        <div class="flex items-center gap-2">
+                            <Radio class="w-4 h-4 text-indigo-400" />
+                            Audio Interface
+                        </div>
+                        {#if audioState.isPrimary}
+                            <span class="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded border border-amber-500/30 font-semibold">Primary</span>
+                        {:else}
+                            <span class="text-xs bg-slate-600/20 text-slate-400 px-2 py-1 rounded border border-slate-600/30 font-semibold">Secondary</span>
+                        {/if}
                     </Card.Title>
                 </Card.Header>
                 <Card.Content class="space-y-4">
                     <div class="space-y-2">
                         <Label for="device" class="text-slate-500">Primary Device</Label>
-                        <Select.Root type="single" bind:value={selectedDeviceValue} disabled={audioState.isRecording}>
+                        <Select.Root type="single" bind:value={selectedDeviceValue} disabled={audioState.isRecording || !audioState.isPrimary}>
                             <Select.Trigger class="bg-slate-950/50 border-slate-800 text-slate-200 focus:ring-indigo-500/50">
                                 {audioState.devices.find(d => d.id?.toString() === selectedDeviceValue)?.name ?? "Select an interface..."}
                             </Select.Trigger>
@@ -121,26 +140,23 @@
                             </Select.Content>
                         </Select.Root>
                     </div>
-                    <Button 
-                        class={cn(
-                            "w-full transition-all duration-300 font-semibold shadow-lg",
-                            audioState.isRunning ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20" : 
-                            "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-900/20"
-                        )}
-                        onclick={handleConnect}
-                        disabled={audioState.isRecording || !selectedDeviceValue}
-                    >
-                        {audioState.isRunning ? "Restart Engine" : "Start Engine"}
-                    </Button>
                 </Card.Content>
             </Card.Root>
 
             <!-- Configuration Card -->
-            <Card.Root class="bg-slate-900/40 border-slate-800 backdrop-blur-xl shadow-2xl overflow-hidden">
+            <Card.Root class={cn(
+                "bg-slate-900/40 border-slate-800 backdrop-blur-xl shadow-2xl overflow-hidden",
+                !audioState.isPrimary && "opacity-50 pointer-events-none"
+            )}>
                 <Card.Header>
-                    <Card.Title class="flex items-center gap-2 text-slate-300">
-                        <Settings class="w-4 h-4 text-indigo-400" />
-                        Configuration
+                    <Card.Title class="flex items-center justify-between text-slate-300">
+                        <div class="flex items-center gap-2">
+                            <Settings class="w-4 h-4 text-indigo-400" />
+                            Configuration
+                        </div>
+                        {#if !audioState.isPrimary}
+                            <span class="text-xs bg-slate-600/20 text-slate-400 px-2 py-1 rounded border border-slate-600/30 font-semibold">Read-only</span>
+                        {/if}
                     </Card.Title>
                 </Card.Header>
                 <Card.Content class="space-y-6">
@@ -151,7 +167,7 @@
                                 type="number" 
                                 bind:value={audioConfig.chLeft} 
                                 class="bg-slate-950/50 border-slate-800 text-slate-200" 
-                                disabled={audioState.isRecording}
+                                disabled={audioState.isRecording || !audioState.isPrimary}
                             />
                         </div>
                         <div class="space-y-2">
@@ -160,7 +176,7 @@
                                 type="number" 
                                 bind:value={audioConfig.chRight} 
                                 class="bg-slate-950/50 border-slate-800 text-slate-200"
-                                disabled={audioState.isRecording}
+                                disabled={audioState.isRecording || !audioState.isPrimary}
                             />
                         </div>
                     </div>
@@ -173,7 +189,7 @@
                             step="0.1"
                             bind:value={audioConfig.boost} 
                             class="bg-slate-950/50 border-slate-800 text-slate-200" 
-                            disabled={audioState.isRecording}
+                            disabled={audioState.isRecording || !audioState.isPrimary}
                         />
                     </div>
 
@@ -181,7 +197,7 @@
                         variant="secondary" 
                         class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
                         onclick={handleUpdateConfig}
-                        disabled={audioState.isRecording}
+                        disabled={audioState.isRecording || !audioState.isPrimary}
                     >
                         Apply Settings
                     </Button>
@@ -196,35 +212,47 @@
                 
                 <!-- Main Controls -->
                 <div class="flex flex-col md:flex-row items-center justify-between gap-6 pb-6 border-b border-slate-800/50">
-                    <Button 
-                        size="lg"
-                        class={cn(
-                            "min-w-[240px] h-16 text-lg font-bold transition-all duration-500 rounded-2xl",
-                            audioState.isRecording ? 
-                            "bg-red-600 hover:bg-red-700 text-white shadow-[0_0_30px_rgba(220,38,38,0.3)] scale-[1.02]" : 
-                            "bg-slate-100 hover:bg-white text-slate-900 shadow-xl"
-                        )}
-                        onclick={handleToggleRec}
-                        disabled={!audioState.isRunning}
-                    >
-                        {#if audioState.isRecording}
-                            <Square class="mr-3 w-6 h-6 fill-current" />
-                            Stop Recording
-                        {:else}
-                            <Play class="mr-3 w-6 h-6 fill-current" />
-                            Start Recording
-                        {/if}
-                    </Button>
+                    {#if audioState.isPrimary}
+                        <div class="flex gap-4">
+                            <Button 
+                                size="lg"
+                                class="min-w-[200px] h-16 text-lg font-bold transition-all duration-500 rounded-2xl flex items-center justify-center pointer-events-auto bg-slate-100 hover:bg-white text-slate-900 shadow-xl"
+                                onclick={() => audioConfig.toggleRecording()}
+                                disabled={!audioState.isRunning || audioState.isRecording}
+                            >
+                                <Play class="mr-3 w-6 h-6 fill-current pointer-events-none" />
+                                Start Recording
+                            </Button>
+                            <Button 
+                                size="lg"
+                                class="min-w-[200px] h-16 text-lg font-bold transition-all duration-500 rounded-2xl flex items-center justify-center pointer-events-auto bg-red-600 hover:bg-red-700 text-white shadow-[0_0_30px_rgba(220,38,38,0.3)]"
+                                onclick={() => audioConfig.toggleRecording()}
+                                disabled={!audioState.isRecording}
+                            >
+                                <Square class="mr-3 w-6 h-6 fill-current pointer-events-none" />
+                                Stop Recording
+                            </Button>
+                        </div>
+                    {:else}
+                        <Button 
+                            size="lg"
+                            class="bg-amber-600 hover:bg-amber-700 text-white shadow-lg"
+                            onclick={() => audioState.requestPrimaryControl()}
+                        >
+                            Request Control
+                        </Button>
+                    {/if}
 
                     <div class="flex flex-col items-center md:items-end gap-2">
                         <div class="flex items-center gap-3 bg-slate-950/50 p-3 rounded-xl border border-slate-800">
                             <div class="flex items-center gap-2">
-                                <Checkbox 
+                                <input 
+                                    type="checkbox" 
                                     id="monitor" 
-                                    bind:checked={audioVisuals.monitoring} 
-                                    onclick={handleMonitorToggle}
+                                    checked={audioVisuals.monitoring}
+                                    onchange={handleMonitorToggle}
                                     disabled={!audioState.isRunning}
-                                    class="border-slate-700" 
+                                    class="border-slate-700 rounded" 
                                 />
                                 <Label for="monitor" class="text-sm cursor-pointer select-none text-slate-300">
                                     Low Latency Monitoring

@@ -6,6 +6,7 @@ import (
 	"behringerRecorder/lib/types"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -28,7 +29,7 @@ func GetLocalIP() string {
 	return conn.LocalAddr().(*net.UDPAddr).IP.String()
 }
 
-func NewDevicesHandler(state *types.AppState) http.HandlerFunc {
+func DevicesHandler(state *types.AppState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("API: Device list requested")
 		state.Mu.RLock()
@@ -44,13 +45,16 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 		type Req struct {
 			Action   string
 			DeviceID int
-			ChL      int
-			ChR      int
+			ChL      *int
+			ChR      *int
 			Folder   string
-			Boost    float64
+			Boost    *float64
 		}
 		var req Req
-		json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", 400)
+			return
+		}
 
 		// Lock for atomic read of recording state
 		state.Mu.RLock()
@@ -68,8 +72,15 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 			state.Mu.Lock()
 			state.IsRunning = true
 			state.DeviceID = req.DeviceID
-			state.ChLeft = req.ChL
-			state.ChRight = req.ChR
+			if req.ChL != nil {
+				state.ChLeft = *req.ChL
+			}
+			if req.ChR != nil {
+				state.ChRight = *req.ChR
+			}
+			if req.Boost != nil {
+				state.Boost = *req.Boost
+			}
 			state.Mu.Unlock()
 			fmt.Printf("[ENGINE] Started with Device ID: %d\n", req.DeviceID)
 			// Notify all clients
@@ -102,8 +113,8 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 			state.File = file
 			state.SamplesWrote = 0
 			state.IsRecording = true
-			if req.Boost > 0 {
-				state.Boost = req.Boost
+			if req.Boost != nil {
+				state.Boost = *req.Boost
 			}
 			state.Mu.Unlock()
 			fmt.Printf("[RECORDING] START - File: %s\n", filename)
@@ -147,9 +158,15 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 		} else if req.Action == "update" && !isRecording {
 			// Only allow config updates when not recording
 			state.Mu.Lock()
-			state.ChLeft = req.ChL
-			state.ChRight = req.ChR
-			state.Boost = req.Boost
+			if req.ChL != nil {
+				state.ChLeft = *req.ChL
+			}
+			if req.ChR != nil {
+				state.ChRight = *req.ChR
+			}
+			if req.Boost != nil {
+				state.Boost = *req.Boost
+			}
 			state.Mu.Unlock()
 			// Notify all clients
 			broadcastStateUpdate(state)
@@ -157,24 +174,106 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 	}
 }
 
-func NewStatusHandler(state *types.AppState) http.HandlerFunc {
+func NewStatusHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		state.Mu.RLock()
 		defer state.Mu.RUnlock()
 		status := struct {
-			IsRunning   bool    `json:"isRunning"`
-			IsRecording bool    `json:"isRecording"`
-			ChL         int     `json:"chL"`
-			ChR         int     `json:"chR"`
-			Boost       float64 `json:"boost"`
+			IsRunning          bool    `json:"isRunning"`
+			IsRecording        bool    `json:"isRecording"`
+			ChL                int     `json:"chL"`
+			ChR                int     `json:"chR"`
+			Boost              float64 `json:"boost"`
+			DeviceId           int     `json:"deviceId"`
+			StorageLocation    string  `json:"storageLocation"`
+			CloudDriveLocation string  `json:"cloudDriveLocation"`
 		}{
-			IsRunning:   state.IsRunning,
-			IsRecording: state.IsRecording,
-			ChL:         state.ChLeft,
-			ChR:         state.ChRight,
-			Boost:       state.Boost,
+			IsRunning:          state.IsRunning,
+			IsRecording:        state.IsRecording,
+			ChL:                state.ChLeft,
+			ChR:                state.ChRight,
+			Boost:              state.Boost,
+			DeviceId:           state.DeviceID,
+			StorageLocation:    cfg.StorageLocation,
+			CloudDriveLocation: cfg.CloudDriveLocation,
 		}
 		json.NewEncoder(w).Encode(status)
+	}
+}
+
+func FilesHandler(cfg *config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		files, err := os.ReadDir(cfg.StorageLocation)
+		if err != nil {
+			http.Error(w, "Failed to read recordings directory", 500)
+			return
+		}
+
+		type FileInfo struct {
+			Name    string    `json:"name"`
+			Size    int64     `json:"size"`
+			ModTime time.Time `json:"modTime"`
+		}
+
+		var list []FileInfo
+		for _, f := range files {
+			if !f.IsDir() && filepath.Ext(f.Name()) == ".wav" {
+				info, err := f.Info()
+				if err == nil {
+					list = append(list, FileInfo{
+						Name:    f.Name(),
+						Size:    info.Size(),
+						ModTime: info.ModTime(),
+					})
+				}
+			}
+		}
+		json.NewEncoder(w).Encode(list)
+	}
+}
+
+func PushHandler(cfg *config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Source string `json:"source"`
+			Target string `json:"target"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request", 400)
+			return
+		}
+
+		sourcePath := filepath.Join(cfg.StorageLocation, req.Source)
+		targetPath := filepath.Join(cfg.CloudDriveLocation, req.Target)
+
+		// Ensure target directory exists
+		if err := os.MkdirAll(cfg.CloudDriveLocation, 0755); err != nil {
+			http.Error(w, "Failed to create target directory", 500)
+			return
+		}
+
+		// Copy file
+		src, err := os.Open(sourcePath)
+		if err != nil {
+			http.Error(w, "Source file not found", 404)
+			return
+		}
+		defer src.Close()
+
+		dst, err := os.Create(targetPath)
+		if err != nil {
+			http.Error(w, "Failed to create destination file", 500)
+			return
+		}
+		defer dst.Close()
+
+		if _, err := io.Copy(dst, src); err != nil {
+			http.Error(w, "Failed to copy file", 500)
+			return
+		}
+
+		fmt.Printf("[CLOUD] Pushed %s -> %s\n", req.Source, req.Target)
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
@@ -198,7 +297,7 @@ func NewWSHandler(state *types.AppState) http.HandlerFunc {
 		}
 
 		// Send initial state to newly connected client
-		sendStateUpdate(conn, state)
+		sendConfigStateUpdate(conn, state)
 		broadcastStateUpdate(state)
 
 		// Listen for client messages
@@ -277,12 +376,11 @@ func NewWSHandler(state *types.AppState) http.HandlerFunc {
 	}
 }
 
-// sendStateUpdate sends the current engine state to a single client.
+// sendConfigStateUpdate sends the current engine state to a single client.
 // Must be called while holding the state mutex to prevent concurrent writes.
-func sendStateUpdate(conn *websocket.Conn, state *types.AppState) {
-	isPrimary := state.PrimaryClient == conn
-
-	update := struct {
+func sendConfigStateUpdate(conn *websocket.Conn, state *types.AppState) {
+	state.Mu.RLock()
+	initialState := struct {
 		Type        string  `json:"type"`
 		IsRunning   bool    `json:"isRunning"`
 		IsRecording bool    `json:"isRecording"`
@@ -295,15 +393,16 @@ func sendStateUpdate(conn *websocket.Conn, state *types.AppState) {
 		Type:        "state",
 		IsRunning:   state.IsRunning,
 		IsRecording: state.IsRecording,
-		IsPrimary:   isPrimary,
+		IsPrimary:   state.PrimaryClient == conn,
 		DeviceID:    state.DeviceID,
 		ChL:         state.ChLeft,
 		ChR:         state.ChRight,
 		Boost:       state.Boost,
 	}
+	state.Mu.RUnlock()
 
 	conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-	conn.WriteJSON(update)
+	conn.WriteJSON(initialState)
 }
 
 // broadcastStateUpdate sends the current engine state to all connected clients.
@@ -313,6 +412,6 @@ func broadcastStateUpdate(state *types.AppState) {
 	defer state.Mu.RUnlock()
 
 	for c := range state.Clients {
-		sendStateUpdate(c, state)
+		sendConfigStateUpdate(c, state)
 	}
 }

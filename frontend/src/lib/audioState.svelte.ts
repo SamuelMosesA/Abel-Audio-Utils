@@ -28,7 +28,6 @@ class AudioState {
     chL = $state(0);
     chR = $state(0);
     boost = $state(0);
-    storageLocation = $state("");
 
     #ws: WebSocket | null = null;
     onMessage: ((dv: DataView) => void) | null = null;
@@ -54,6 +53,10 @@ class AudioState {
             const status: AppStatus = await res.json();
             this.isRunning = status.isRunning;
             this.isRecording = status.isRecording;
+            this.chL = status.chL;
+            this.chR = status.chR;
+            this.boost = status.boost;
+            this.selectedDeviceId = status.deviceId;
         } catch (e) {
             console.error("Error syncing status", e);
         }
@@ -105,7 +108,7 @@ class AudioState {
                         this.chL = message.chL;
                         this.chR = message.chR;
                         this.boost = message.boost;
-                        
+
                         // Log recording state changes
                         if (oldIsRecording !== message.isRecording) {
                             console.log(`[STATE] Recording changed: ${oldIsRecording} -> ${message.isRecording}`);

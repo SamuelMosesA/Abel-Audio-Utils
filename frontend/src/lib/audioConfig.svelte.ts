@@ -1,32 +1,20 @@
 import { audioState } from "./audioState.svelte";
+import { fileState } from "./fileState.svelte";
 
 class AudioConfig {
-    chLeft = $state(0);
-    chRight = $state(1);
-    boost = $state(1.0);
-
     constructor() {
         this.syncConfig();
     }
 
     async syncConfig() {
-        try {
-            const res = await fetch("/api/status");
-            const status = await res.json();
-            this.chLeft = status.chL;
-            this.chRight = status.chR;
-            this.boost = status.boost;
-            audioState.selectedDeviceId = status.deviceId;
-        } catch (e) {
-            console.error("Error syncing config", e);
-        }
+        await audioState.syncStatus();
     }
 
-    async connectDevice(id: string | number) {
+    async connectDevice(id: number) {
         try {
             const res = await fetch("/api/control", {
                 method: "POST",
-                body: JSON.stringify({ action: "connect", DeviceID: parseInt(id.toString()) })
+                body: JSON.stringify({ action: "connect", DeviceID: id })
             });
             if (res.ok) {
                 audioState.isRunning = true;
@@ -46,8 +34,7 @@ class AudioConfig {
             await fetch("/api/control", {
                 method: "POST",
                 body: JSON.stringify({
-                    action,
-                    Boost: parseFloat(this.boost.toString())
+                    action: action
                 })
             });
             // Don't update state here - let the WebSocket state update handle it
@@ -62,9 +49,9 @@ class AudioConfig {
                 method: "POST",
                 body: JSON.stringify({
                     action: "update",
-                    chL: parseInt(this.chLeft.toString()),
-                    chR: parseInt(this.chRight.toString()),
-                    Boost: parseFloat(this.boost.toString())
+                    chL: parseInt(audioState.chL.toString()),
+                    chR: parseInt(audioState.chR.toString()),
+                    Boost: parseFloat(audioState.boost.toString())
                 })
             });
         } catch (e) {

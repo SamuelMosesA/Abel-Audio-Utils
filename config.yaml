@@ -1,11 +1,25 @@
 # Behringer Audio Recorder Configuration
 
 # Server settings
+# The port the web server will listen on.
 port: "8080"
 
 # Audio settings
+# The sample rate for recording and playback.
 sample_rate: 48000
+# The size of the audio buffer.
 buffer_size: 1024
 
+# Default Routing & Gain
+# Default left input channel index (0-indexed).
+default_ch_l: 1
+# Default right input channel index (0-indexed).
+default_ch_r: 0
+# Default digital gain boost multiplier.
+default_boost: 1.0
+
 # Storage settings
+# Local directory where .wav files will be saved.
 storage_location: "./recordings"
+# Target directory for the "Push to Cloud" feature.
+cloud_drive_location: "./cloud_drive"

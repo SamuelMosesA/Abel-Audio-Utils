@@ -5,6 +5,7 @@ import (
 	"behringerRecorder/lib/portaudio"
 	"behringerRecorder/lib/types"
 	"behringerRecorder/lib/web"
+	"flag"
 	"fmt"
 	"html/template"
 	"log"
@@ -20,22 +21,32 @@ func PrintGreen(msg string) {
 }
 
 func main() {
-	cfg, err := config.LoadConfig("config.yaml")
+	// Allow providing a config file path via CLI: `-config /path/to/config.yaml`.
+	cfgPath := flag.String("config", "config.yaml", "path to config YAML file")
+	flag.Parse()
+
+	cfg, err := config.LoadConfig(*cfgPath)
 	if err != nil {
 		log.Fatalf("Error loading config: %v", err)
 	}
 	if abs, err := filepath.Abs(cfg.StorageLocation); err == nil {
 		cfg.StorageLocation = abs
 	}
+	if abs, err := filepath.Abs(cfg.CloudDriveLocation); err == nil {
+		cfg.CloudDriveLocation = abs
+	}
+
+	fmt.Printf("[CONFIG] Loaded: L:%d, R:%d, Boost:%.1f, Storage:%s\n",
+		cfg.DefaultChL, cfg.DefaultChR, cfg.DefaultBoost, cfg.StorageLocation)
 
 	pa.Initialize()
 	defer pa.Terminate()
 
 	state := &types.AppState{
 		Clients:      make(map[*websocket.Conn]bool),
-		ChLeft:       0,
-		ChRight:      1,
-		Boost:        1.0,
+		ChLeft:       cfg.DefaultChL,
+		ChRight:      cfg.DefaultChR,
+		Boost:        cfg.DefaultBoost,
 		RecordChan:   make(chan []float32, 100),
 		PlaybackChan: make(chan []float32, 100),
 	}
@@ -43,7 +54,7 @@ func main() {
 	state.Devices, _ = pa.Devices()
 
 	// Start workers
-	web.StartBroadcaster(state, state.PlaybackChan)
+	web.StartAudioBroadcaster(state, state.PlaybackChan)
 	portaudio.StartStorageWorker(state, state.RecordChan)
 
 	tmpl := template.Must(template.ParseFiles("static/index.html"))
@@ -62,9 +73,12 @@ func main() {
 		tmpl.Execute(w, cfg)
 	})
 
-	http.HandleFunc("/api/devices", web.NewDevicesHandler(state))
-	http.HandleFunc("/api/status", web.NewStatusHandler(state))
+	http.HandleFunc("/api/devices", web.DevicesHandler(state))
+	http.Handle("/api/recordings/", http.StripPrefix("/api/recordings/", http.FileServer(http.Dir(cfg.StorageLocation))))
+	http.HandleFunc("/api/files", web.FilesHandler(cfg))
+	http.HandleFunc("/api/status", web.NewStatusHandler(state, cfg))
 	http.HandleFunc("/api/control", web.NewControlHandler(state, cfg))
+	http.HandleFunc("/api/push", web.PushHandler(cfg))
 	http.HandleFunc("/ws", web.NewWSHandler(state))
 
 	PrintGreen(fmt.Sprintf("UI: http://%s:%s", web.GetLocalIP(), cfg.Port))

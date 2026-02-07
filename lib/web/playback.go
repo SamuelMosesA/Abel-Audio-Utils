@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// CalculateMeters finds the peak (maximum absolute) volume for left and right channels.
+// CalculatePeakMeters finds the peak (maximum absolute) volume for left and right channels.
 // Used to display VU meters in the UI showing real-time recording levels.
 //
 // Parameters:
@@ -20,7 +20,7 @@ import (
 //
 //	maxVolL: Peak absolute value for left channel [0.0 to 1.0]
 //	maxVolR: Peak absolute value for right channel [0.0 to 1.0]
-func CalculateMeters(buffer []float32) (float32, float32) {
+func CalculatePeakMeters(buffer []float32) (float32, float32) {
 	var maxVolL, maxVolR float32
 	for i := 0; i < len(buffer); i += 2 {
 		sL := float32(math.Abs(float64(buffer[i])))
@@ -35,7 +35,7 @@ func CalculateMeters(buffer []float32) (float32, float32) {
 	return maxVolL, maxVolR
 }
 
-// StartBroadcaster starts a goroutine that continuously broadcasts audio data to connected WebSocket clients.
+// StartAudioBroadcaster starts a goroutine that continuously broadcasts audio data to connected WebSocket clients.
 // It encodes audio chunks into a binary protocol and sends them to the frontend UI.
 //
 // Binary Protocol Format (Little Endian):
@@ -59,10 +59,10 @@ func CalculateMeters(buffer []float32) (float32, float32) {
 //	  Bytes 12-15: cd cc 9e be (-0.3 as float32 audio sample)
 //	  Bytes 16-19: cd cc cc 3d (0.1 as float32 audio sample)
 //	  Bytes 20-23: cd cc 23 3e (0.2 as float32 audio sample)
-func StartBroadcaster(state *types.AppState, playbackChan <-chan []float32) {
+func StartAudioBroadcaster(state *types.AppState, playbackChan <-chan []float32) {
 	go func() {
 		for chunk := range playbackChan {
-			maxL, maxR := CalculateMeters(chunk)
+			maxL, maxR := CalculatePeakMeters(chunk)
 
 			state.Mu.RLock()
 			if len(state.Clients) == 0 {

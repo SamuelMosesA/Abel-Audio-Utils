@@ -1,8 +1,10 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { audioState } from './lib/audioState.svelte';
+    import { fileState } from './lib/fileState.svelte';
     import { audioConfig } from './lib/audioConfig.svelte';
     import { audioVisuals } from './lib/audioVisuals.svelte';
+    import RecordingList from './lib/components/RecordingList.svelte';
     import * as Card from "$lib/components/ui/card/index.js";
     import { Button } from "$lib/components/ui/button/index.js";
     import { Input } from "$lib/components/ui/input/index.js";
@@ -12,6 +14,7 @@
     import { Mic, Radio, Play, Square, Settings, Folder, Wifi, WifiOff } from "lucide-svelte";
     import { cn } from "$lib/utils";
 
+    // store device selection as a string to match Select component value types
     let selectedDeviceValue = $state<string | undefined>(undefined);
 
     // Sync device selection both ways
@@ -23,16 +26,19 @@
 
     // Trigger connect when user selects a device
     $effect(() => {
-        if (selectedDeviceValue && selectedDeviceValue !== audioState.selectedDeviceId.toString()) {
+        if (selectedDeviceValue && Number(selectedDeviceValue) !== audioState.selectedDeviceId) {
             handleConnect();
         }
     });
 
+    // Refresh file list when recording stops
+    $effect(() => {
+        if (!audioState.isRecording) {
+            fileState.fetchFiles();
+        }
+    });
+
     onMount(() => {
-        // Initial config from window if injected
-        const storageLocation = (window as any).__INITIAL_CONFIG__?.StorageLocation || "";
-        audioState.storageLocation = storageLocation;
-        
         // Ensure state is synced from backend on load
         audioState.syncStatus();
         audioConfig.syncConfig();
@@ -40,7 +46,9 @@
 
     const handleConnect = async () => {
         if (!selectedDeviceValue) return;
-        await audioConfig.connectDevice(selectedDeviceValue);
+        const id = Number(selectedDeviceValue);
+        if (Number.isNaN(id)) return;
+        await audioConfig.connectDevice(id);
     };
 
     const handleToggleRec = async () => {
@@ -129,7 +137,7 @@
                         <Label for="device" class="text-slate-500">Primary Device</Label>
                         <Select.Root type="single" bind:value={selectedDeviceValue} disabled={audioState.isRecording || !audioState.isPrimary}>
                             <Select.Trigger class="bg-slate-950/50 border-slate-800 text-slate-200 focus:ring-indigo-500/50">
-                                {audioState.devices.find(d => d.id?.toString() === selectedDeviceValue)?.name ?? "Select an interface..."}
+                                {audioState.devices.find(d => d.id === Number(selectedDeviceValue))?.name ?? "Select an interface..."}
                             </Select.Trigger>
                             <Select.Content class="bg-slate-900 border-slate-800 text-slate-200">
                                 {#each audioState.devices as device}
@@ -165,7 +173,7 @@
                             <Label for="chL" class="text-slate-500">Left Channel</Label>
                             <Input 
                                 type="number" 
-                                bind:value={audioConfig.chLeft} 
+                                bind:value={audioState.chL} 
                                 class="bg-slate-950/50 border-slate-800 text-slate-200" 
                                 disabled={audioState.isRecording || !audioState.isPrimary}
                             />
@@ -174,7 +182,7 @@
                             <Label for="chR" class="text-slate-500">Right Channel</Label>
                             <Input 
                                 type="number" 
-                                bind:value={audioConfig.chRight} 
+                                bind:value={audioState.chR} 
                                 class="bg-slate-950/50 border-slate-800 text-slate-200"
                                 disabled={audioState.isRecording || !audioState.isPrimary}
                             />
@@ -187,7 +195,7 @@
                             id="boost"
                             type="number" 
                             step="0.1"
-                            bind:value={audioConfig.boost} 
+                            bind:value={audioState.boost} 
                             class="bg-slate-950/50 border-slate-800 text-slate-200" 
                             disabled={audioState.isRecording || !audioState.isPrimary}
                         />
@@ -259,9 +267,15 @@
                                 </Label>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2 text-xs text-slate-500">
-                            <Folder class="w-3 h-3" />
-                            {audioState.storageLocation}
+                        <div class="flex flex-col items-center md:items-end gap-2 text-right">
+                            <div class="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                                <span class="bg-slate-800 px-1.5 py-0.5 rounded text-indigo-400">STORAGE</span>
+                                {fileState.storageLocation}
+                            </div>
+                            <div class="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                                <span class="bg-slate-800 px-1.5 py-0.5 rounded text-amber-500">CLOUD</span>
+                                {fileState.cloudDriveLocation}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -271,12 +285,6 @@
                     <div class="space-y-3">
                         <div class="flex justify-between items-end px-1">
                             <span class="text-xs font-bold text-slate-400">Peak Meters</span>
-                            <div class="flex gap-4 text-[10px] font-mono text-slate-600 uppercase tracking-widest">
-                                <span>-60db</span>
-                                <span>-18db</span>
-                                <span>-6db</span>
-                                <span class="text-red-500/50 font-bold">0db</span>
-                            </div>
                         </div>
                         
                         <div class="space-y-4">
@@ -284,7 +292,7 @@
                             <div class="flex items-center gap-3">
                                 <span class="text-xs font-bold text-slate-500 w-4">L</span>
                                 <div class="flex-1 h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800 shadow-inner p-0.5">
-                                    <div 
+                                    <div
                                         class={cn(
                                             "h-full transition-all duration-75 rounded-full shadow-[0_0_10px_rgba(34,197,94,0.3)]",
                                             audioVisuals.currentMeters.L > 95 ? "bg-gradient-to-r from-emerald-500 via-yellow-400 to-red-500 shadow-red-500/20" : "bg-gradient-to-r from-emerald-600 to-emerald-400"
@@ -292,13 +300,14 @@
                                         style="width: {audioVisuals.currentMeters.L}%"
                                     ></div>
                                 </div>
+                                <span class="ml-3 text-xs text-slate-400 w-16 text-right">{audioVisuals.currentDb.L <= -99 ? '−∞' : `${audioVisuals.currentDb.L.toFixed(1)} dB`}</span>
                             </div>
                             
                             <!-- Right -->
                             <div class="flex items-center gap-3">
                                 <span class="text-xs font-bold text-slate-500 w-4">R</span>
                                 <div class="flex-1 h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800 shadow-inner p-0.5">
-                                    <div 
+                                    <div
                                         class={cn(
                                             "h-full transition-all duration-75 rounded-full shadow-[0_0_10px_rgba(34,197,94,0.3)]",
                                             audioVisuals.currentMeters.R > 95 ? "bg-gradient-to-r from-emerald-500 via-yellow-400 to-red-500 shadow-red-500/20" : "bg-gradient-to-r from-emerald-600 to-emerald-400"
@@ -306,6 +315,7 @@
                                         style="width: {audioVisuals.currentMeters.R}%"
                                     ></div>
                                 </div>
+                                <span class="ml-3 text-xs text-slate-400 w-16 text-right">{audioVisuals.currentDb.R <= -99 ? '−∞' : `${audioVisuals.currentDb.R.toFixed(1)} dB`}</span>
                             </div>
                         </div>
                     </div>
@@ -313,6 +323,8 @@
 
             </Card.Content>
         </Card.Root>
+
+        <RecordingList />
 
         <footer class="text-center py-8">
             <p class="text-xs text-slate-600 font-medium uppercase tracking-[0.2em]">

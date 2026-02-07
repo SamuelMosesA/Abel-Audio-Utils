@@ -34,6 +34,16 @@ func StartAudioEngine(state *types.AppState, cfg *config.Config, deviceID int, r
 		log.Printf("[AUDIO] Started: %s", dev.Name)
 		defer log.Println("[AUDIO] Stopped")
 
+		// Input buffer provided to PortAudio. When the stream is opened we pass
+		// this slice to PortAudio. Each call to `stream.Read()` fills `in` with
+		// `FramesPerBuffer` frames of audio. Samples are float32 values in the
+		// range [-1.0, 1.0], laid out as interleaved channels per frame:
+		//   [frame0_ch0, frame0_ch1, ..., frame0_chN, frame1_ch0, frame1_ch1, ...]
+		// The total length is `cfg.BufferSize * dev.MaxInputChannels`.
+		//
+		// We later read specific input channel indexes (chL / chR) out of this
+		// interleaved buffer and copy them into a separate stereo buffer
+		// (`stereoChunk`) with layout [L,R,L,R,...] for consumers.
 		in := make([]float32, cfg.BufferSize*dev.MaxInputChannels)
 		stream, err := pa.OpenStream(pa.StreamParameters{
 			Input:      pa.StreamDeviceParameters{Device: dev, Channels: dev.MaxInputChannels, Latency: dev.DefaultLowInputLatency},
@@ -60,15 +70,25 @@ func StartAudioEngine(state *types.AppState, cfg *config.Config, deviceID int, r
 			default:
 			}
 
+			// `stream.Read()` blocks (or returns quickly depending on callback/RT
+			// behavior) and fills the `in` slice with the next `cfg.BufferSize`
+			// frames of audio, in the interleaved layout described above. An
+			// error can indicate an underrun/overrun or device error; when it
+			// happens we skip this buffer and continue.
 			if err := stream.Read(); err != nil {
 				continue
 			}
 
 			stereoChunk := make([]float32, cfg.BufferSize*2)
 			for i := 0; i < cfg.BufferSize; i++ {
+				// Compute index into the interleaved `in` buffer for this
+				// frame `i` and the chosen channel indexes `chL`/`chR`.
+				// Formula: index = (frameIndex * numChannels) + channelIndex
 				idxL := (i * dev.MaxInputChannels) + chL
 				idxR := (i * dev.MaxInputChannels) + chR
 
+				// Read samples if available (some devices may report fewer
+				// channels than MaxInputChannels; guard against out-of-range).
 				var sL, sR float32
 				if idxL < len(in) {
 					sL = in[idxL]
@@ -77,6 +97,10 @@ func StartAudioEngine(state *types.AppState, cfg *config.Config, deviceID int, r
 					sR = in[idxR]
 				}
 
+				// Apply gain/boost, then clamp to the valid float sample range
+				// expected by downstream consumers ([-1.0, 1.0]). This keeps the
+				// audio safe for playback and prevents extreme values when
+				// serializing or writing to files.
 				sL *= boost
 				sR *= boost
 				if sL > 1.0 {

@@ -7,10 +7,14 @@ import (
 )
 
 type Config struct {
-	Port            string `yaml:"port"`
-	SampleRate      int    `yaml:"sample_rate"`
-	BufferSize      int    `yaml:"buffer_size"`
-	StorageLocation string `yaml:"storage_location"`
+	Port               string  `yaml:"port"`
+	SampleRate         int     `yaml:"sample_rate"`
+	BufferSize         int     `yaml:"buffer_size"`
+	StorageLocation    string  `yaml:"storage_location"`
+	CloudDriveLocation string  `yaml:"cloud_drive_location"`
+	DefaultChL         int     `yaml:"default_ch_l"`
+	DefaultChR         int     `yaml:"default_ch_r"`
+	DefaultBoost       float64 `yaml:"default_boost"`
 }
 
 func LoadConfig(path string) (*Config, error) {

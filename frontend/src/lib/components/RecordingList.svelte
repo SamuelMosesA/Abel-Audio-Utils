@@ -38,21 +38,21 @@
 <SimpleCard class="space-y-8 md:space-y-10">
     <div class="flex items-center gap-3 text-muted-foreground">
         <FileAudio class="w-4 h-4 text-primary" />
-        <span class="text-[10px] font-black uppercase tracking-widest">Master Recording Library</span>
+        <span class="text-xs font-black uppercase tracking-widest">Master Recording Library</span>
     </div>
 
     <!-- System Paths -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 pb-6 md:pb-10 border-b border-border/40">
         <SimpleCard class="p-4 md:p-5 bg-card/50 space-y-1.5 md:space-y-2 group hover:border-primary/20 transition-colors min-w-0 border-dashed">
-            <span class="text-[8px] md:text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground group-hover:text-primary transition-colors">Storage Cluster</span>
-            <div class="flex items-center gap-2 md:gap-3 text-[10px] md:text-xs font-mono text-white opacity-80" title={audioState.storageLocation}>
+            <span class="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground group-hover:text-primary transition-colors">Storage Cluster</span>
+            <div class="flex items-center gap-2 md:gap-3 text-xs font-mono text-white opacity-80" title={audioState.storageLocation}>
                 <div class="w-1 md:w-1.5 h-1 md:h-1.5 rounded-full bg-primary/40 shrink-0"></div>
                 <div class="truncate">{audioState.storageLocation}</div>
             </div>
         </SimpleCard>
         <SimpleCard class="p-4 md:p-5 bg-card/50 space-y-1.5 md:space-y-2 group hover:border-primary/20 transition-colors min-w-0 border-dashed">
-            <span class="text-[8px] md:text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground group-hover:text-primary transition-colors">Remote Archive</span>
-            <div class="flex items-center gap-2 md:gap-3 text-[10px] md:text-xs font-mono text-white opacity-80" title={audioState.cloudDriveLocation}>
+            <span class="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground group-hover:text-primary transition-colors">Remote Archive</span>
+            <div class="flex items-center gap-2 md:gap-3 text-xs font-mono text-white opacity-80" title={audioState.cloudDriveLocation}>
                 <div class="w-1 md:w-1.5 h-1 md:h-1.5 rounded-full bg-primary/40 shrink-0"></div>
                 <div class="truncate">{audioState.cloudDriveLocation}</div>
             </div>
@@ -73,7 +73,7 @@
                         </div>
                         <div class="space-y-1 min-w-0">
                             <h3 class="font-bold text-base md:text-lg text-white truncate">{file.name}</h3>
-                            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] md:text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">
+                            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-black uppercase tracking-widest text-muted-foreground/60">
                                 <span class="text-primary/80 shrink-0">{formatSize(file.size)}</span>
                                 <span class="opacity-20 hidden md:inline">•</span>
                                 <span class="shrink-0">{formatDate(file.modTime)}</span>
@@ -104,14 +104,14 @@
 <!-- Push Dialog Modal -->
 {#if pushingFile}
     <div class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
-        <SimpleCard class="w-full max-w-lg bg-[#0a0a0a] border-primary/20 p-10 space-y-10 animate-in zoom-in-[0.98] shadow-[0_0_100px_rgba(34,197,94,0.1)]">
+        <SimpleCard class="w-full max-w-lg bg-[#0a0a0a] border-primary/20 p-10 space-y-10 animate-in zoom-in-[0.98]">
             <div class="flex items-center justify-between">
                 <div class="space-y-1">
                     <h2 class="text-2xl font-bold text-white flex items-center gap-3">
                         <Cloud class="w-6 h-6 text-primary" />
                         Cloud Backup
                     </h2>
-                    <p class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Transferring session to remote storage</p>
+                    <p class="text-xs font-black uppercase tracking-widest text-muted-foreground">Transferring session to remote storage</p>
                 </div>
                 <SimpleButton variant="ghost" class="p-2 rounded-full h-auto" onclick={() => pushingFile = null}>
                     <X class="w-6 h-6" />
@@ -127,7 +127,7 @@
                 </div>
 
                 <div class="space-y-4">
-                    <span class="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">Cloud Destination Filename</span>
+                    <span class="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">Cloud Destination Filename</span>
                     <SimpleInput 
                         bind:value={targetFilename}
                         class="w-full"

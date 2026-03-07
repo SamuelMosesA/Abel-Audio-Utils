@@ -25,5 +25,5 @@
     {onkeydown}
     bind:value={value}
     {...rest}
-    class="h-12 md:h-14 bg-background border border-border/40 rounded-lg px-4 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all font-bold text-white {className}"
+    class="h-12 md:h-14 bg-background border border-border/40 rounded-lg px-4 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all font-bold text-white text-sm {className}"
 />

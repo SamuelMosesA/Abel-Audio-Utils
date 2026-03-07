@@ -1,9 +1,11 @@
 <script lang="ts">
     import { audioState } from "$lib/audioState.svelte";
     import { goto } from "$app/navigation";
-    import { Input } from "$lib/components/ui/input/index.js";
     import { Label } from "$lib/components/ui/label/index.js";
     import { Lock, AlertCircle, ChevronLeft, Loader2, Shield } from "lucide-svelte";
+    import SimpleCard from "./ui/SimpleCard.svelte";
+    import SimpleButton from "./ui/SimpleButton.svelte";
+    import SimpleInput from "./ui/SimpleInput.svelte";
 
     let password = $state("");
     let error = $state("");
@@ -26,16 +28,17 @@
 
 <div class="max-w-lg mx-auto py-32 px-6 space-y-12 animate-in fade-in zoom-in-[0.99] duration-700">
     <div class="flex items-center justify-between">
-        <button 
+        <SimpleButton 
             onclick={() => goto("/")} 
-            class="min-btn-ghost px-0 hover:bg-transparent"
+            variant="ghost"
+            class="px-0 hover:bg-transparent"
         >
             <ChevronLeft class="w-4 h-4 mr-1" />
             Back
-        </button>
+        </SimpleButton>
     </div>
 
-    <div class="min-card space-y-12 py-12 px-10 bg-card">
+    <SimpleCard class="space-y-12 py-12 px-10">
         <div class="space-y-4">
             <div class="p-3 bg-primary/10 rounded-2xl w-fit">
                 <Shield class="w-10 h-10 text-primary" />
@@ -55,20 +58,20 @@
             {/if}
 
             <div class="space-y-3">
-                <Label for="password" class="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">System Access Key</Label>
-                <Input 
+                <Label for="password" class="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">System Access Key</Label>
+                <SimpleInput 
                     id="password" 
                     type="password" 
                     bind:value={password} 
                     oninput={() => audioState.wasKicked = false}
                     placeholder="••••••••"
-                    class="min-input h-14 bg-black text-lg tracking-widest placeholder:text-muted-foreground/20"
+                    class="h-14 bg-black text-lg tracking-widest placeholder:text-muted-foreground/20"
                     onkeydown={(e: KeyboardEvent) => e.key === "Enter" && handleLogin()}
                 />
             </div>
 
-            <button 
-                class="min-btn-primary w-full h-14 text-sm tracking-widest uppercase"
+            <SimpleButton 
+                class="w-full h-14"
                 onclick={handleLogin}
                 disabled={isLoading}
             >
@@ -79,7 +82,7 @@
                     Unlock Audio Console
                     <Lock class="w-4 h-4 ml-2" />
                 {/if}
-            </button>
+            </SimpleButton>
         </div>
-    </div>
+    </SimpleCard>
 </div>

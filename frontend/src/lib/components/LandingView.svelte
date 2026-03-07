@@ -6,7 +6,7 @@
 
 <div class="max-w-5xl mx-auto space-y-12 md:space-y-20 py-12 md:py-24 px-4 md:px-6 animate-in fade-in slide-in-from-bottom-6 duration-1000">
     <div class="space-y-4 md:space-y-6 text-center md:text-left">
-        <div class="flex items-center justify-center md:justify-start gap-2 text-primary font-bold text-[10px] md:text-xs tracking-[0.3em] uppercase">
+        <div class="flex items-center justify-center md:justify-start gap-2 text-primary font-bold text-xs tracking-[0.3em] uppercase">
             <Zap class="w-3.5 h-3.5 md:w-4 md:h-4 fill-current" />
             Audio Engine v2.0
         </div>

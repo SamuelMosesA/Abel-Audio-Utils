@@ -7,9 +7,9 @@
     <div class="grid grid-cols-1 gap-12">
         <!-- Left -->
         <div class="space-y-4">
-            <div class="flex items-center justify-between text-[11px] font-black tracking-[0.2em] text-muted-foreground uppercase">
+            <div class="flex items-center justify-between text-xs font-black tracking-[0.2em] text-muted-foreground uppercase">
                 <div class="flex items-center gap-3">
-                    <div class="w-1.5 h-3 bg-primary rounded-full shadow-[0_0_8px_var(--color-primary)]"></div>
+                    <div class="w-1.5 h-3 bg-primary rounded-full"></div>
                     System L
                 </div>
                 <div class={cn("font-mono text-base font-black transition-colors duration-200", audioVisuals.currentDb.L > -3 ? "text-destructive" : "text-primary")}>
@@ -33,9 +33,9 @@
 
         <!-- Right -->
         <div class="space-y-4">
-            <div class="flex items-center justify-between text-[11px] font-black tracking-[0.2em] text-muted-foreground uppercase">
+            <div class="flex items-center justify-between text-xs font-black tracking-[0.2em] text-muted-foreground uppercase">
                 <div class="flex items-center gap-3">
-                    <div class="w-1.5 h-3 bg-primary rounded-full shadow-[0_0_8px_var(--color-primary)]"></div>
+                    <div class="w-1.5 h-3 bg-primary rounded-full"></div>
                     System R
                 </div>
                 <div class={cn("font-mono text-base font-black transition-colors duration-200", audioVisuals.currentDb.R > -3 ? "text-destructive" : "text-primary")}>

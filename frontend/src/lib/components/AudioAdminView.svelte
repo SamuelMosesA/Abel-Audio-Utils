@@ -73,13 +73,13 @@
                 </h1>
                 <div class="flex items-center justify-center md:justify-start gap-3">
                     <div
-                        class="flex items-center gap-2 px-3 py-1 rounded-full border text-[10px] font-black tracking-widest uppercase transition-all duration-500 {audioState.wsConnected
+                        class="flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-black tracking-widest uppercase transition-all duration-500 {audioState.wsConnected
                             ? 'bg-primary/10 border-primary/20 text-primary'
                             : 'bg-destructive/10 border-destructive/20 text-destructive'}"
                     >
                         <span
                             class="w-1.5 h-1.5 rounded-full {audioState.wsConnected
-                                ? 'bg-primary animate-pulse shadow-[0_0_8px_var(--color-primary)]'
+                                ? 'bg-primary animate-pulse'
                                 : 'bg-destructive'}"
                         ></span>
                         {audioState.wsConnected
@@ -117,14 +117,14 @@
         <SimpleCard class="space-y-6 md:space-y-8 text-white">
             <div class="flex items-center gap-3 text-muted-foreground">
                 <Radio class="w-4 h-4 text-primary" />
-                <span class="text-[10px] font-black uppercase tracking-widest"
+                <span class="text-xs font-black uppercase tracking-widest"
                     >Interface Configuration</span
                 >
             </div>
             <div class="space-y-3">
                 <Label
                     for="device"
-                    class="text-muted-foreground text-[10px] font-black tracking-wider uppercase ml-1"
+                    class="text-muted-foreground text-xs font-black tracking-wider uppercase ml-1"
                     >Portaudio Devices</Label
                 >
                 <Select.Root
@@ -158,14 +158,14 @@
         <SimpleCard class="space-y-6 md:space-y-8 text-white">
             <div class="flex items-center gap-3 text-muted-foreground">
                 <Settings class="w-4 h-4 text-primary" />
-                <span class="text-[10px] font-black uppercase tracking-widest"
+                <span class="text-xs font-black uppercase tracking-widest"
                     >Engine Parameters</span
                 >
             </div>
             <div class="grid grid-cols-2 gap-4 md:gap-6">
                 <div class="space-y-3">
                     <Label
-                        class="text-muted-foreground text-[10px] font-black tracking-wider uppercase ml-1"
+                        class="text-muted-foreground text-xs font-black tracking-wider uppercase ml-1"
                         >Ch L</Label
                     >
                     <SimpleInput
@@ -177,7 +177,7 @@
                 </div>
                 <div class="space-y-3">
                     <Label
-                        class="text-muted-foreground text-[10px] font-black tracking-wider uppercase ml-1"
+                        class="text-muted-foreground text-xs font-black tracking-wider uppercase ml-1"
                         >Ch R</Label
                     >
                     <SimpleInput
@@ -190,7 +190,7 @@
             </div>
             <div class="space-y-3">
                 <Label
-                    class="text-muted-foreground text-[10px] font-black tracking-wider uppercase ml-1"
+                    class="text-muted-foreground text-xs font-black tracking-wider uppercase ml-1"
                     >Digital Gain</Label
                 >
                 <div class="flex flex-col sm:flex-row gap-4">
@@ -225,7 +225,7 @@
             >
                 <span
                     class="w-2 md:w-2.5 h-2 md:h-2.5 rounded-full {audioState.isRecording
-                        ? 'bg-destructive animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.6)]'
+                        ? 'bg-destructive animate-pulse'
                         : 'bg-primary/30'}"
                 ></span>
                 <span
@@ -271,7 +271,7 @@
             <div class="flex items-center gap-2 md:gap-3 text-muted-foreground">
                 <Activity class="w-4 h-4 text-primary" />
                 <span
-                    class="text-[9px] md:text-[10px] font-black uppercase tracking-widest"
+                    class="text-xs font-black uppercase tracking-widest"
                     >Low Latency Monitors</span
                 >
             </div>
@@ -288,7 +288,7 @@
                 />
                 <Label
                     for="monitor"
-                    class="text-[10px] font-black cursor-pointer uppercase tracking-widest text-muted-foreground"
+                    class="text-xs font-black cursor-pointer uppercase tracking-widest text-muted-foreground"
                     >Play Audio</Label
                 >
             </div>

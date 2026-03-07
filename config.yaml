@@ -3,6 +3,8 @@
 # Server settings
 # The port the web server will listen on.
 port: "8080"
+# Password for Audio Admin access.
+admin_password: "password123"
 
 # Audio settings
 # The sample rate for recording and playback.

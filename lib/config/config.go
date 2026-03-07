@@ -15,6 +15,7 @@ type Config struct {
 	DefaultChL         int     `yaml:"default_ch_l"`
 	DefaultChR         int     `yaml:"default_ch_r"`
 	DefaultBoost       float64 `yaml:"default_boost"`
+	AdminPassword      string  `yaml:"admin_password"`
 }
 
 func LoadConfig(path string) (*Config, error) {

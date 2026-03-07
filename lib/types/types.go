@@ -1,8 +1,10 @@
 package types
 
 import (
+	"math"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	pa "github.com/gordonklaus/portaudio"
 	"github.com/gorilla/websocket"
@@ -10,18 +12,18 @@ import (
 
 type AppState struct {
 	Mu          sync.RWMutex
-	IsRecording bool
-	IsRunning   bool // Engine status
-	DeviceID    int  // Currently connected device ID
-	ChLeft      int
-	ChRight     int
-	Boost       float64
+	IsRecording atomic.Bool
+	IsRunning   atomic.Bool // Engine status
+	DeviceID    atomic.Int32
+	ChLeft      atomic.Int32
+	ChRight     atomic.Int32
+	Boost       atomic.Uint64 // Storing float64 bits
 
 	File         *os.File
-	SamplesWrote int64
+	SamplesWrote atomic.Int64
 
-	Clients       map[*WSClient]bool
-	PrimaryClient *WSClient // Client with primary control
+	Clients       sync.Map // map[*WSClient]bool
+	AdminClient   atomic.Pointer[WSClient]
 	QuitAudio     chan bool
 
 	// Communication channels
@@ -31,14 +33,26 @@ type AppState struct {
 	StorageLocation    string
 	CloudDriveLocation string
 
+	// Live streaming channels
+	StreamChannels sync.Map // map[chan []float32]bool
+
 	// Audio Devices cache
 	Devices []*pa.DeviceInfo
+}
+
+func (s *AppState) GetBoost() float64 {
+	return math.Float64frombits(s.Boost.Load())
+}
+
+func (s *AppState) SetBoost(b float64) {
+	s.Boost.Store(math.Float64bits(b))
 }
 
 // WSClient wraps a websocket connection with a mutex for thread-safe writes.
 type WSClient struct {
 	Conn *websocket.Conn
 	Mu   sync.Mutex
+	Type string // "admin" or "listener"
 }
 
 func (c *WSClient) WriteJSON(v interface{}) error {

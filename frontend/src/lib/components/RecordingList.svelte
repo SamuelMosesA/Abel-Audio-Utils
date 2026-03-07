@@ -88,7 +88,7 @@
                             <audio 
                                 controls 
                                 src="/api/recordings/{file.name}" 
-                                class="h-8 w-full sm:w-[180px]"
+                                class="h-8 w-full sm:w-[400px]"
                             ></audio>
                             <Button 
                                 variant="ghost" 

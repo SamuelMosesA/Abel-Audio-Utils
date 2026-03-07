@@ -11,7 +11,7 @@
     <div class="space-y-5">
         <!-- Left -->
         <div class="space-y-2">
-            <div class="flex items-center justify-between text-[11px] font-black font-mono text-muted-foreground/80 tracking-tighter">
+            <div class="flex items-center justify-between text-s font-black font-mono text-muted-foreground/80 tracking-tighter">
                 <span class="flex items-center gap-1.5">
                     <span class="w-1 h-3 bg-primary rounded-full"></span>
                     LEFT CHANNEL
@@ -20,7 +20,7 @@
                     {audioVisuals.currentDb.L <= -99 ? "−∞" : `${audioVisuals.currentDb.L.toFixed(1)} dB`}
                 </span>
             </div>
-            <div class="h-3 bg-black/80 rounded-full overflow-hidden border border-white/5 shadow-inner p-0.5">
+            <div class="h-3 bg-black/20 rounded-full overflow-hidden border border-white/5 shadow-inner p-0.5">
                 <div
                     class={cn(
                         "h-full transition-all duration-75 rounded-full shadow-[0_0_15px_hsl(var(--primary)/0.4)] min-w-[2px]",
@@ -35,16 +35,16 @@
 
         <!-- Right -->
         <div class="space-y-2">
-            <div class="flex items-center justify-between text-[11px] font-black font-mono text-muted-foreground/80 tracking-tighter">
+            <div class="flex items-center justify-between text-s font-black font-mono text-muted-foreground/80 tracking-tighter">
                 <span class="flex items-center gap-1.5">
-                    <span class="w-1 h-3 bg-primary rounded-full"></span>
+                    <span class="w-1 h-3 bg-red-500 rounded-full"></span>
                     RIGHT CHANNEL
                 </span>
                 <span class={cn("transition-colors", audioVisuals.currentDb.R > -3 ? "text-red-500 font-bold" : "text-primary/90")}>
                     {audioVisuals.currentDb.R <= -99 ? "−∞" : `${audioVisuals.currentDb.R.toFixed(1)} dB`}
                 </span>
             </div>
-            <div class="h-3 bg-black/80 rounded-full overflow-hidden border border-white/5 shadow-inner p-0.5">
+            <div class="h-3 bg-black/20 rounded-full overflow-hidden border border-white/5 shadow-inner p-0.5">
                 <div
                     class={cn(
                         "h-full transition-all duration-75 rounded-full shadow-[0_0_15px_hsl(var(--primary)/0.4)] min-w-[2px]",

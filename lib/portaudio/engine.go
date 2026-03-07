@@ -33,14 +33,41 @@ func StartAudioEngine(state *types.AppState, cfg *config.Config, deviceID int, r
 	go func() {
 		log.Printf("[AUDIO] Started: %s", dev.Name)
 		defer log.Println("[AUDIO] Stopped")
+		defer state.IsRunning.Store(false)
+		defer func() {
+			if state.Translator != nil {
+				state.Translator.CloseAll()
+			}
+		}()
 
 		in := make([]float32, cfg.BufferSize*dev.MaxInputChannels)
+		log.Printf("[AUDIO] Opening stream: %s (%d channels, %d Hz)", dev.Name, dev.MaxInputChannels, cfg.SampleRate)
+		
 		stream, err := pa.OpenStream(pa.StreamParameters{
 			Input:      pa.StreamDeviceParameters{Device: dev, Channels: dev.MaxInputChannels, Latency: dev.DefaultLowInputLatency},
 			SampleRate: float64(cfg.SampleRate), FramesPerBuffer: cfg.BufferSize,
 		}, in)
+		
 		if err != nil {
-			log.Println(err)
+			log.Printf("[AUDIO] Failed to open stream with %d channels: %v. Trying with 2 channels...", dev.MaxInputChannels, err)
+			
+			// Fallback to 2 channels if possible
+			channels := 2
+			if dev.MaxInputChannels < 2 {
+				channels = dev.MaxInputChannels
+			}
+			
+			if channels > 0 {
+				in = make([]float32, cfg.BufferSize*channels)
+				stream, err = pa.OpenStream(pa.StreamParameters{
+					Input:      pa.StreamDeviceParameters{Device: dev, Channels: channels, Latency: dev.DefaultLowInputLatency},
+					SampleRate: float64(cfg.SampleRate), FramesPerBuffer: cfg.BufferSize,
+				}, in)
+			}
+		}
+
+		if err != nil {
+			log.Printf("[AUDIO] Error opening stream: %v", err)
 			return
 		}
 		stream.Start()

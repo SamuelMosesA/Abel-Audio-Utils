@@ -3,7 +3,7 @@ package web
 import (
 	"behringerRecorder/lib/types"
 	"encoding/binary"
-	"fmt"
+	"log"
 	"math"
 	"time"
 
@@ -62,8 +62,9 @@ func CalculatePeakMeters(buffer []float32) (float32, float32) {
 //	  Bytes 20-23: cd cc 23 3e (0.2 as float32 audio sample)
 func StartAudioBroadcaster(state *types.AppState, playbackChan <-chan []float32) {
 	go func() {
-		var lastLog time.Time
+		count := 0
 		for chunk := range playbackChan {
+			// Calculate peak meters for the chunk
 			maxL, maxR := CalculatePeakMeters(chunk)
 
 			// Build binary packet for WS
@@ -76,22 +77,15 @@ func StartAudioBroadcaster(state *types.AppState, playbackChan <-chan []float32)
 			}
 
 			// Broadcast to all WS clients
-			clientCount := 0
 			state.Clients.Range(func(key, value interface{}) bool {
-				clientCount++
-				c := key.(*types.WSClient)
-				c.Conn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
-				err := c.WriteMessage(websocket.BinaryMessage, packetBuf)
+				client := key.(*types.WSClient)
+				client.Conn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+				err := client.Conn.WriteMessage(websocket.BinaryMessage, packetBuf)
 				if err != nil {
-					fmt.Printf("[WS] Failed to send to %p: %v\n", c, err)
+					// Low-level write failure, don't spam
 				}
 				return true
 			})
-
-			if clientCount > 0 && time.Since(lastLog) > 5*time.Second {
-				fmt.Printf("[WS] Broadcasting meters to %d clients. Packet size: %d\n", clientCount, len(packetBuf))
-				lastLog = time.Now()
-			}
 
 			// Fan out to HTTP stream channels
 			state.StreamChannels.Range(func(key, value interface{}) bool {
@@ -103,6 +97,16 @@ func StartAudioBroadcaster(state *types.AppState, playbackChan <-chan []float32)
 				}
 				return true
 			})
+
+			// Push to Gemini for translation
+			if state.Translator != nil {
+				state.Translator.PushAudio(chunk)
+			}
+
+			count++
+			if count%100 == 0 {
+				log.Printf("[BROADCAST] Processed %d chunks", count)
+			}
 		}
 	}()
 }

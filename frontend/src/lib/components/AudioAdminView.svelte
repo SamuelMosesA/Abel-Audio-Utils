@@ -20,6 +20,7 @@
     import SimpleCard from "./ui/SimpleCard.svelte";
     import SimpleButton from "./ui/SimpleButton.svelte";
     import SimpleInput from "./ui/SimpleInput.svelte";
+    import TranslationAdmin from "./TranslationAdmin.svelte";
     import { onMount } from "svelte";
 
     let selectedDeviceValue = $state<string | undefined>(undefined);
@@ -211,6 +212,9 @@
                 </div>
             </div>
         </SimpleCard>
+
+        <!-- Translation Monitoring -->
+        <TranslationAdmin />
     </div>
 
     <!-- Recording Controls -->

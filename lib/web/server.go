@@ -11,7 +11,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -28,6 +31,38 @@ func GetLocalIP() string {
 	}
 	defer conn.Close()
 	return conn.LocalAddr().(*net.UDPAddr).IP.String()
+}
+
+func GetWiFiSSID() string {
+	if runtime.GOOS == "darwin" {
+		// macOS
+		cmd := exec.Command("/System/Library/PrivateFrameworks/Apple80211.framework/Resources/airport", "-I")
+		out, err := cmd.Output()
+		if err != nil {
+			return "N/A"
+		}
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "SSID: ") {
+				return strings.TrimPrefix(line, "SSID: ")
+			}
+		}
+	} else if runtime.GOOS == "linux" {
+		// Linux
+		cmd := exec.Command("nmcli", "-t", "-f", "active,ssid", "dev", "wifi")
+		out, err := cmd.Output()
+		if err != nil {
+			return "N/A"
+		}
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "yes:") {
+				return strings.TrimPrefix(line, "yes:")
+			}
+		}
+	}
+	return "N/A"
 }
 
 func DevicesHandler(state *types.AppState) http.HandlerFunc {
@@ -62,6 +97,7 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 			ChR      *int
 			Folder   string
 			Boost    *float64
+			Language string
 		}
 		var req Req
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -129,7 +165,7 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 			file := state.File
 			state.File = nil
 			state.Mu.Unlock()
-			
+
 			samplesWrote := state.SamplesWrote.Load()
 
 			if file == nil {
@@ -154,6 +190,10 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 			if req.Boost != nil {
 				state.SetBoost(*req.Boost)
 			}
+		} else if req.Action == "stop_translation" {
+			if state.Translator != nil && req.Language != "" {
+				state.Translator.StopSession(req.Language)
+			}
 		}
 	}
 }
@@ -161,14 +201,17 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 func NewStatusHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := struct {
-			IsRunning          bool    `json:"isRunning"`
-			IsRecording        bool    `json:"isRecording"`
-			ChL                int     `json:"chL"`
-			ChR                int     `json:"chR"`
-			Boost              float64 `json:"boost"`
-			DeviceId           int     `json:"deviceId"`
-			StorageLocation    string  `json:"storageLocation"`
-			CloudDriveLocation string  `json:"cloudDriveLocation"`
+			IsRunning          bool                `json:"isRunning"`
+			IsRecording        bool                `json:"isRecording"`
+			ChL                int                 `json:"chL"`
+			ChR                int                 `json:"chR"`
+			Boost              float64             `json:"boost"`
+			DeviceId           int                 `json:"deviceId"`
+			StorageLocation    string              `json:"storageLocation"`
+			CloudDriveLocation string              `json:"cloudDriveLocation"`
+			Translations       []types.SessionInfo `json:"translations"`
+			ServerURL          string              `json:"serverUrl"`
+			SSID               string              `json:"ssid"`
 		}{
 			IsRunning:          state.IsRunning.Load(),
 			IsRecording:        state.IsRecording.Load(),
@@ -178,6 +221,11 @@ func NewStatusHandler(state *types.AppState, cfg *config.Config) http.HandlerFun
 			DeviceId:           int(state.DeviceID.Load()),
 			StorageLocation:    state.StorageLocation,
 			CloudDriveLocation: state.CloudDriveLocation,
+			ServerURL:          fmt.Sprintf("http://%s:%s", GetLocalIP(), cfg.Port),
+			SSID:               GetWiFiSSID(),
+		}
+		if state.Translator != nil {
+			status.Translations = state.Translator.ListSessions()
 		}
 		json.NewEncoder(w).Encode(status)
 	}
@@ -308,10 +356,13 @@ func NewWSHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 
 func StreamHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// lang := filepath.Base(r.URL.Path) // Handle /api/stream/{lang} later
-		
-		fmt.Printf("[STREAM] New listener connected: %s\n", r.RemoteAddr)
-		
+		lang := filepath.Base(r.URL.Path)
+		if lang == "stream" || lang == "/" {
+			lang = "default"
+		}
+
+		fmt.Printf("[STREAM] New listener connected: %s (lang: %s)\n", r.RemoteAddr, lang)
+
 		w.Header().Set("Content-Type", "audio/wav")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -324,9 +375,9 @@ func StreamHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 		binary.LittleEndian.PutUint32(header[4:8], 0xFFFFFFFF) // File size
 		copy(header[8:12], "WAVE")
 		copy(header[12:16], "fmt ")
-		binary.LittleEndian.PutUint32(header[16:20], 16)   // fmt chunk size
-		binary.LittleEndian.PutUint16(header[20:22], 1)    // PCM
-		binary.LittleEndian.PutUint16(header[22:24], 2)    // Channels
+		binary.LittleEndian.PutUint32(header[16:20], 16) // fmt chunk size
+		binary.LittleEndian.PutUint16(header[20:22], 1)  // PCM
+		binary.LittleEndian.PutUint16(header[22:24], 2)  // Channels
 		binary.LittleEndian.PutUint32(header[24:28], uint32(cfg.SampleRate))
 		binary.LittleEndian.PutUint32(header[28:32], uint32(cfg.SampleRate*2*2)) // Byte rate
 		binary.LittleEndian.PutUint16(header[32:34], 4)                          // Block align
@@ -339,19 +390,33 @@ func StreamHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 			f.Flush()
 		}
 
-		// Create a channel for this client
-		ch := make(chan []float32, 100)
-		state.StreamChannels.Store(ch, true)
+		// Create or get the audio channel
+		var ch chan []float32
+		isTranslated := false
+		if lang != "default" && state.Translator != nil {
+			ch = state.Translator.GetChannel(lang)
+			if ch != nil {
+				isTranslated = true
+			}
+		}
 
-		defer func() {
-			state.StreamChannels.Delete(ch)
-			fmt.Printf("[STREAM] Listener disconnected: %s\n", r.RemoteAddr)
-		}()
+		if ch == nil {
+			// fallback to standard stream
+			ch = make(chan []float32, 100)
+			state.StreamChannels.Store(ch, true)
+			defer state.StreamChannels.Delete(ch)
+		}
+
+		fmt.Printf("[STREAM] New listener connected: %s (lang: %s, translated: %v)\n", r.RemoteAddr, lang, isTranslated)
+		defer fmt.Printf("[STREAM] Listener disconnected: %s (lang: %s)\n", r.RemoteAddr, lang)
 
 		// Write PCM data
 		for {
 			select {
-			case chunk := <-ch:
+			case chunk, ok := <-ch:
+				if !ok {
+					return
+				}
 				// Convert float32 [-1, 1] to i16 for classic WAV
 				pcmBuf := make([]byte, len(chunk)*2)
 				for i, v := range chunk {

@@ -25,3 +25,7 @@ default_boost: 1.0
 storage_location: "./recordings"
 # Target directory for the "Push to Cloud" feature.
 cloud_drive_location: "./cloud_drive"
+
+# Translation
+gemini_api_key: "AIzaSyCODzC-gR57NhKf_uBf3Pbb2ouUQljEYcc"
+gemini_model: "models/gemini-2.5-flash-native-audio-preview-12-2025"

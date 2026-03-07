@@ -4,6 +4,11 @@ export interface Device {
     inputs: number;
 }
 
+export interface TranslationSession {
+    language: string;
+    listeners: number;
+}
+
 export interface MeterState {
     L: number;
     R: number;
@@ -18,6 +23,9 @@ export interface AppStatus {
     boost: number;
     storageLocation: string;
     cloudDriveLocation: string;
+    translations: TranslationSession[];
+    serverUrl: string;
+    ssid: string;
 }
 
 class AudioState {
@@ -32,6 +40,9 @@ class AudioState {
     boost = $state(0);
     storageLocation = $state("");
     cloudDriveLocation = $state("");
+    translations = $state<TranslationSession[]>([]);
+    serverUrl = $state("");
+    ssid = $state("");
 
     // Auth and Routing state
     isAuthenticated = $state(false);
@@ -71,6 +82,9 @@ class AudioState {
             this.selectedDeviceId = status.deviceId;
             this.storageLocation = status.storageLocation;
             this.cloudDriveLocation = status.cloudDriveLocation;
+            this.translations = status.translations || [];
+            this.serverUrl = status.serverUrl;
+            this.ssid = status.ssid;
         } catch (e) {
             console.error("Error syncing status", e);
         }

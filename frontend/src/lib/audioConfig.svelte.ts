@@ -28,6 +28,14 @@ class AudioConfig {
             })
         });
     }
+
+    async stopTranslation(language: string) {
+        await fetchWithSync("/api/control", {
+            method: "POST",
+            body: JSON.stringify({ action: "stop_translation", language })
+        });
+        await audioState.syncStatus();
+    }
 }
 
 export const audioConfig = new AudioConfig();

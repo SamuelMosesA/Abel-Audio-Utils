@@ -2,6 +2,7 @@ package main
 
 import (
 	"behringerRecorder/lib/config"
+	"behringerRecorder/lib/gemini"
 	"behringerRecorder/lib/portaudio"
 	"behringerRecorder/lib/types"
 	"behringerRecorder/lib/web"
@@ -51,7 +52,23 @@ func main() {
 	state.SetBoost(cfg.DefaultBoost)
 	state.DeviceID.Store(-1) // No device selected initially
 
-	state.Devices, _ = pa.Devices()
+	// Initialize Translation Manager if API key provided
+	if cfg.GeminiAPIKey != "" {
+		tm, err := gemini.NewTranslationManager(cfg.GeminiAPIKey, cfg.GeminiModel)
+		if err != nil {
+			fmt.Printf("[GEMINI] Warning: Failed to init Translation Manager: %v\n", err)
+		} else {
+			state.Translator = tm
+			fmt.Printf("[GEMINI] Translation enabled using model: %s\n", cfg.GeminiModel)
+		}
+	}
+
+	allDevices, _ := pa.Devices()
+	for _, d := range allDevices {
+		if d.MaxInputChannels > 0 {
+			state.Devices = append(state.Devices, d)
+		}
+	}
 
 	// Start workers
 	web.StartAudioBroadcaster(state, state.PlaybackChan)

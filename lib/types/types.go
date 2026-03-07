@@ -38,6 +38,22 @@ type AppState struct {
 
 	// Audio Devices cache
 	Devices []*pa.DeviceInfo
+
+	// Translation
+	Translator Translator
+}
+
+type SessionInfo struct {
+	Language  string `json:"language"`
+	Listeners int    `json:"listeners"`
+}
+
+type Translator interface {
+	GetChannel(language string) chan []float32
+	PushAudio(chunk []float32)
+	CloseAll()
+	ListSessions() []SessionInfo
+	StopSession(language string)
 }
 
 func (s *AppState) GetBoost() float64 {

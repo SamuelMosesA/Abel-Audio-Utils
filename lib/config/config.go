@@ -16,6 +16,8 @@ type Config struct {
 	DefaultChR         int     `yaml:"default_ch_r"`
 	DefaultBoost       float64 `yaml:"default_boost"`
 	AdminPassword      string  `yaml:"admin_password"`
+	GeminiAPIKey       string  `yaml:"gemini_api_key"`
+	GeminiModel        string  `yaml:"gemini_model"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -30,6 +32,13 @@ func LoadConfig(path string) (*Config, error) {
 	err = decoder.Decode(&cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	if cfg.GeminiAPIKey == "" {
+		cfg.GeminiAPIKey = os.Getenv("GEMINI_API_KEY")
+	}
+	if cfg.GeminiModel == "" {
+		cfg.GeminiModel = "models/gemini-2.0-flash-exp" // Default model
 	}
 
 	return &cfg, nil

@@ -1,68 +1,65 @@
 <script lang="ts">
     import { goto } from "$app/navigation";
-    import { audioState } from "$lib/audioState.svelte";
-    import { Button } from "$lib/components/ui/button/index.js";
-    import * as Card from "$lib/components/ui/card/index.js";
-    import { Mic, Headphones, ArrowRight, ShieldCheck } from "lucide-svelte";
+    import { Headphones, ShieldCheck, ArrowRight, Zap } from "lucide-svelte";
+    import SimpleCard from "./ui/SimpleCard.svelte";
 </script>
 
-<div class="h-[70vh] flex flex-col items-center justify-center space-y-12 animate-in fade-in zoom-in-95 duration-700">
-    <div class="text-center space-y-4">
-        <h1 class="text-5xl md:text-6xl font-black tracking-tighter bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent">
-            X32 CONSOLE
+<div class="max-w-5xl mx-auto space-y-12 md:space-y-20 py-12 md:py-24 px-4 md:px-6 animate-in fade-in slide-in-from-bottom-6 duration-1000">
+    <div class="space-y-4 md:space-y-6 text-center md:text-left">
+        <div class="flex items-center justify-center md:justify-start gap-2 text-primary font-bold text-xs tracking-[0.3em] uppercase">
+            <Zap class="w-3.5 h-3.5 md:w-4 md:h-4 fill-current" />
+            Audio Engine v2.0
+        </div>
+        <h1 class="text-3xl sm:text-5xl md:text-7xl font-bold tracking-tight text-white max-w-3xl leading-[1.1] mx-auto md:mx-0">
+            Professional Console <br class="hidden sm:block" />
+            <span class="text-muted-foreground">Digital Recorder</span>
         </h1>
-        <p class="text-muted-foreground text-lg font-medium tracking-wide border-t border-border pt-2">
-            PROFESSIONAL AUDIO ENGINE
+        <p class="text-muted-foreground text-sm md:text-xl max-w-2xl leading-relaxed mx-auto md:mx-0">
+            High-performance recording and streaming interface for Behringer X32 and M32 consoles. Synchronized cloud storage and real-time monitoring.
         </p>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-3xl">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
         <!-- Listener Card -->
         <button 
             onclick={() => goto("/stream")}
-            class="group relative"
+            class="group text-left"
         >
-            <div class="absolute -inset-1 bg-gradient-to-r from-primary/20 to-emerald-500/20 rounded-3xl blur opacity-25 group-hover:opacity-100 transition duration-500"></div>
-            <Card.Root class="relative bg-card/40 border-border backdrop-blur-xl h-full transition-all duration-300 group-hover:bg-card/60 group-hover:border-primary/50 text-left overflow-hidden">
-                <Card.Header>
-                    <div class="p-3 bg-muted rounded-2xl w-fit group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-300">
-                        <Headphones class="w-6 h-6" />
+            <SimpleCard class="hover:border-primary/40 group-hover:bg-muted/5 h-full flex flex-col justify-between space-y-8 md:space-y-10 group-active:scale-[0.99] p-6 md:p-8">
+                <div class="space-y-4 md:space-y-6 flex flex-col items-center md:items-start text-center md:text-left">
+                    <div class="p-3 bg-primary/10 text-primary rounded-xl w-fit group-hover:bg-primary group-hover:text-primary-foreground transition-all duration-300">
+                        <Headphones class="w-7 h-7" />
                     </div>
-                </Card.Header>
-                <Card.Content class="space-y-2">
-                    <Card.Title class="text-2xl">Listen to Stream</Card.Title>
-                    <Card.Description class="text-base">Join as a listener to hear the live audio feed from the console.</Card.Description>
-                </Card.Content>
-                <Card.Footer>
-                    <div class="flex items-center text-sm font-bold text-primary opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-[-10px] group-hover:translate-x-0">
-                        START STREAMING <ArrowRight class="ml-2 w-4 h-4" />
+                    <div class="space-y-2">
+                        <h2 class="text-2xl font-bold text-white">Live Listener</h2>
+                        <p class="text-muted-foreground text-base md:text-lg text-pretty">Join as an authenticated listener to hear the live stream feed.</p>
                     </div>
-                </Card.Footer>
-            </Card.Root>
+                </div>
+                <div class="flex items-center justify-center md:justify-start text-xs md:text-sm font-bold text-primary tracking-widest uppercase">
+                    Launch Stream <ArrowRight class="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </div>
+            </SimpleCard>
         </button>
 
         <!-- Admin Card -->
         <button 
             onclick={() => goto("/admin")}
-            class="group relative"
+            class="group text-left"
         >
-            <div class="absolute -inset-1 bg-gradient-to-r from-amber-500/20 to-orange-600/20 rounded-3xl blur opacity-25 group-hover:opacity-100 transition duration-500"></div>
-            <Card.Root class="relative bg-card/40 border-border backdrop-blur-xl h-full transition-all duration-300 group-hover:bg-card/60 group-hover:border-amber-500/50 text-left overflow-hidden">
-                <Card.Header>
-                    <div class="p-3 bg-muted rounded-2xl w-fit group-hover:bg-amber-500 group-hover:text-white transition-colors duration-300">
-                        <ShieldCheck class="w-6 h-6" />
+            <SimpleCard class="hover:border-primary/40 group-hover:bg-muted/5 h-full flex flex-col justify-between space-y-8 md:space-y-10 group-active:scale-[0.99] p-6 md:p-8">
+                <div class="space-y-4 md:space-y-6 flex flex-col items-center md:items-start text-center md:text-left">
+                    <div class="p-3 bg-primary/10 text-primary rounded-xl w-fit group-hover:bg-primary group-hover:text-primary-foreground transition-all duration-300">
+                        <ShieldCheck class="w-7 h-7" />
                     </div>
-                </Card.Header>
-                <Card.Content class="space-y-2">
-                    <Card.Title class="text-2xl">Audio Admin</Card.Title>
-                    <Card.Description class="text-base">Login to control recording, engine settings, and channel routing.</Card.Description>
-                </Card.Content>
-                <Card.Footer>
-                    <div class="flex items-center text-sm font-bold text-amber-500 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-[-10px] group-hover:translate-x-0">
-                        ADMIN ACCESS <ArrowRight class="ml-2 w-4 h-4" />
+                    <div class="space-y-2">
+                        <h2 class="text-2xl font-bold text-white">Audio Admin</h2>
+                        <p class="text-muted-foreground text-base md:text-lg text-pretty">Control engine settings, manage routing, and handle all recording operations.</p>
                     </div>
-                </Card.Footer>
-            </Card.Root>
+                </div>
+                <div class="flex items-center justify-center md:justify-start text-xs md:text-sm font-bold text-primary tracking-widest uppercase">
+                    Admin Portal <ArrowRight class="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </div>
+            </SimpleCard>
         </button>
     </div>
 </div>

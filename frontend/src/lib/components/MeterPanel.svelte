@@ -3,57 +3,57 @@
     import { cn } from "$lib/utils/utils";
 </script>
 
-<div class="space-y-6">
-    <div class="flex justify-between items-end px-1">
-        <span class="text-xs font-bold text-muted-foreground uppercase tracking-widest">Peak Meters</span>
-    </div>
-
-    <div class="space-y-5">
+<div class="space-y-10">
+    <div class="grid grid-cols-1 gap-12">
         <!-- Left -->
-        <div class="space-y-2">
-            <div class="flex items-center justify-between text-s font-black font-mono text-muted-foreground/80 tracking-tighter">
-                <span class="flex items-center gap-1.5">
-                    <span class="w-1 h-3 bg-primary rounded-full"></span>
-                    LEFT CHANNEL
-                </span>
-                <span class={cn("transition-colors", audioVisuals.currentDb.L > -3 ? "text-red-500 font-bold" : "text-primary/90")}>
+        <div class="space-y-4">
+            <div class="flex items-center justify-between text-xs font-black tracking-[0.2em] text-muted-foreground uppercase">
+                <div class="flex items-center gap-3">
+                    <div class="w-1.5 h-3 bg-primary rounded-full"></div>
+                    System L
+                </div>
+                <div class={cn("font-mono text-base font-black transition-colors duration-200", audioVisuals.currentDb.L > -3 ? "text-destructive" : "text-primary")}>
                     {audioVisuals.currentDb.L <= -99 ? "−∞" : `${audioVisuals.currentDb.L.toFixed(1)} dB`}
-                </span>
+                </div>
             </div>
-            <div class="h-3 bg-black/20 rounded-full overflow-hidden border border-white/5 shadow-inner p-0.5">
+            <div class="h-6 bg-black border border-border/60 rounded-xl overflow-hidden p-1 relative shadow-inner">
                 <div
                     class={cn(
-                        "h-full transition-all duration-75 rounded-full shadow-[0_0_15px_hsl(var(--primary)/0.4)] min-w-[2px]",
-                        audioVisuals.currentDb.L > -3
-                            ? "bg-gradient-to-r from-emerald-500 via-yellow-400 to-red-600 shadow-red-500/20"
-                            : "bg-primary",
+                        "h-full transition-all duration-75 rounded-lg relative overflow-hidden",
+                        audioVisuals.currentDb.L > -12 
+                            ? "bg-gradient-to-r from-emerald-500 from-60% via-yellow-400 via-85% to-destructive transition-all" 
+                            : "bg-primary"
                     )}
                     style="width: {audioVisuals.currentMeters.L}%"
-                ></div>
+                >
+                    <div class="absolute inset-0 opacity-20 bg-[linear-gradient(90deg,transparent_90%,rgba(0,0,0,0.4)_90%)] bg-[length:20px_100%]"></div>
+                </div>
             </div>
         </div>
 
         <!-- Right -->
-        <div class="space-y-2">
-            <div class="flex items-center justify-between text-s font-black font-mono text-muted-foreground/80 tracking-tighter">
-                <span class="flex items-center gap-1.5">
-                    <span class="w-1 h-3 bg-red-500 rounded-full"></span>
-                    RIGHT CHANNEL
-                </span>
-                <span class={cn("transition-colors", audioVisuals.currentDb.R > -3 ? "text-red-500 font-bold" : "text-primary/90")}>
+        <div class="space-y-4">
+            <div class="flex items-center justify-between text-xs font-black tracking-[0.2em] text-muted-foreground uppercase">
+                <div class="flex items-center gap-3">
+                    <div class="w-1.5 h-3 bg-primary rounded-full"></div>
+                    System R
+                </div>
+                <div class={cn("font-mono text-base font-black transition-colors duration-200", audioVisuals.currentDb.R > -3 ? "text-destructive" : "text-primary")}>
                     {audioVisuals.currentDb.R <= -99 ? "−∞" : `${audioVisuals.currentDb.R.toFixed(1)} dB`}
-                </span>
+                </div>
             </div>
-            <div class="h-3 bg-black/20 rounded-full overflow-hidden border border-white/5 shadow-inner p-0.5">
+            <div class="h-6 bg-black border border-border/60 rounded-xl overflow-hidden p-1 relative shadow-inner">
                 <div
                     class={cn(
-                        "h-full transition-all duration-75 rounded-full shadow-[0_0_15px_hsl(var(--primary)/0.4)] min-w-[2px]",
-                        audioVisuals.currentDb.R > -3
-                            ? "bg-gradient-to-r from-emerald-500 via-yellow-400 to-red-600 shadow-red-500/20"
-                            : "bg-primary",
+                        "h-full transition-all duration-75 rounded-lg relative overflow-hidden",
+                        audioVisuals.currentDb.R > -12 
+                            ? "bg-gradient-to-r from-emerald-500 from-60% via-yellow-400 via-85% to-destructive transition-all" 
+                            : "bg-primary"
                     )}
                     style="width: {audioVisuals.currentMeters.R}%"
-                ></div>
+                >
+                    <div class="absolute inset-0 opacity-20 bg-[linear-gradient(90deg,transparent_90%,rgba(0,0,0,0.4)_90%)] bg-[length:20px_100%]"></div>
+                </div>
             </div>
         </div>
     </div>

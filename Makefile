@@ -10,7 +10,8 @@ build-frontend:
 	@echo "Building frontend..."
 	cd $(FRONTEND_DIR) && npm install && npm run build
 	mkdir -p $(STATIC_DIR)
-	cp -r $(FRONTEND_DIR)/dist/* $(STATIC_DIR)/
+	rm -rf $(STATIC_DIR)/*
+	cp -r $(FRONTEND_DIR)/static/* $(STATIC_DIR)/
 
 build-backend:
 	@echo "Building backend..."

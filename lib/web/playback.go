@@ -3,6 +3,7 @@ package web
 import (
 	"behringerRecorder/lib/types"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"time"
 
@@ -61,40 +62,47 @@ func CalculatePeakMeters(buffer []float32) (float32, float32) {
 //	  Bytes 20-23: cd cc 23 3e (0.2 as float32 audio sample)
 func StartAudioBroadcaster(state *types.AppState, playbackChan <-chan []float32) {
 	go func() {
+		var lastLog time.Time
 		for chunk := range playbackChan {
 			maxL, maxR := CalculatePeakMeters(chunk)
 
-			state.Mu.RLock()
-			if len(state.Clients) == 0 {
-				state.Mu.RUnlock()
-				continue
-			}
-
-			// Build binary packet: [maxL (4B)] [maxR (4B)] [audio samples (4B each)]
+			// Build binary packet for WS
 			packetSize := 8 + (len(chunk) * 4)
 			packetBuf := make([]byte, packetSize)
-
-			// Write meter peaks (float32 bits in little endian)
 			binary.LittleEndian.PutUint32(packetBuf[0:], math.Float32bits(maxL))
 			binary.LittleEndian.PutUint32(packetBuf[4:], math.Float32bits(maxR))
-
-			// Write audio samples as float32 in little endian
 			for i, v := range chunk {
 				binary.LittleEndian.PutUint32(packetBuf[8+i*4:], math.Float32bits(v))
 			}
 
-			for c := range state.Clients {
-				c.Conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-				if err := c.WriteMessage(websocket.BinaryMessage, packetBuf); err != nil {
-					c.Close()
-					// We can't delete here while RLock holds.
-					// The handler loop in server.go handles cleanup on error/close.
+			// Broadcast to all WS clients
+			clientCount := 0
+			state.Clients.Range(func(key, value interface{}) bool {
+				clientCount++
+				c := key.(*types.WSClient)
+				c.Conn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+				err := c.WriteMessage(websocket.BinaryMessage, packetBuf)
+				if err != nil {
+					fmt.Printf("[WS] Failed to send to %p: %v\n", c, err)
 				}
-			}
-			state.Mu.RUnlock()
+				return true
+			})
 
-			// Re-acquire lock to delete closed clients if needed
-			// For now, let's just keep it simple as it was a POC
+			if clientCount > 0 && time.Since(lastLog) > 5*time.Second {
+				fmt.Printf("[WS] Broadcasting meters to %d clients. Packet size: %d\n", clientCount, len(packetBuf))
+				lastLog = time.Now()
+			}
+
+			// Fan out to HTTP stream channels
+			state.StreamChannels.Range(func(key, value interface{}) bool {
+				ch := key.(chan []float32)
+				select {
+				case ch <- chunk:
+				default:
+					// Channel full, skip to maintain real-time
+				}
+				return true
+			})
 		}
 	}()
 }

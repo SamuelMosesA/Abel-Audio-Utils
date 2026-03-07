@@ -7,7 +7,6 @@ import (
 	"behringerRecorder/lib/web"
 	"flag"
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -20,7 +19,7 @@ func PrintGreen(msg string) {
 }
 
 func main() {
-	// Allow providing a config file path via CLI: `-config /path/to/config.yaml`.
+	// ... (rest of main initialization)
 	cfgPath := flag.String("config", "config.yaml", "path to config YAML file")
 	flag.Parse()
 
@@ -42,15 +41,15 @@ func main() {
 	defer pa.Terminate()
 
 	state := &types.AppState{
-		Clients:            make(map[*types.WSClient]bool),
-		ChLeft:             cfg.DefaultChL,
-		ChRight:            cfg.DefaultChR,
-		Boost:              cfg.DefaultBoost,
-		RecordChan:         make(chan []float32, 100),
-		PlaybackChan:       make(chan []float32, 100),
 		StorageLocation:    cfg.StorageLocation,
 		CloudDriveLocation: cfg.CloudDriveLocation,
+		RecordChan:         make(chan []float32, 100),
+		PlaybackChan:       make(chan []float32, 100),
 	}
+	state.ChLeft.Store(int32(cfg.DefaultChL))
+	state.ChRight.Store(int32(cfg.DefaultChR))
+	state.SetBoost(cfg.DefaultBoost)
+	state.DeviceID.Store(-1) // No device selected initially
 
 	state.Devices, _ = pa.Devices()
 
@@ -58,21 +57,23 @@ func main() {
 	web.StartAudioBroadcaster(state, state.PlaybackChan)
 	portaudio.StartStorageWorker(state, state.RecordChan)
 
-	tmpl := template.Must(template.ParseFiles("static/index.html"))
+	// 1. Static Assets (JS, CSS, etc.)
+	http.Handle("/static/", http.FileServer(http.Dir("static")))
 
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
-	http.Handle("/assets/", http.FileServer(http.Dir("static"))) // Vite assets are in static/assets
-	http.HandleFunc("/vite.svg", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "static/vite.svg")
-	})
+	// 2. Main HTML Routes
+	htmlRoutes := map[string]string{
+		"/":       "static/index.html",
+		"/admin":  "static/admin.html",
+		"/login":  "static/login.html",
+		"/stream": "static/stream.html",
+	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.FileServer(http.Dir("static")).ServeHTTP(w, r)
-			return
-		}
-		tmpl.Execute(w, cfg)
-	})
+	for path, file := range htmlRoutes {
+		f := file // closure capture
+		http.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, f)
+		})
+	}
 
 	http.HandleFunc("/api/devices", web.DevicesHandler(state))
 	http.Handle("/api/recordings/", http.StripPrefix("/api/recordings/", http.FileServer(http.Dir(cfg.StorageLocation))))
@@ -80,7 +81,10 @@ func main() {
 	http.HandleFunc("/api/status", web.NewStatusHandler(state, cfg))
 	http.HandleFunc("/api/control", web.NewControlHandler(state, cfg))
 	http.HandleFunc("/api/push", web.PushHandler(cfg))
-	http.HandleFunc("/ws", web.NewWSHandler(state))
+	http.HandleFunc("/api/login", web.LoginHandler(cfg))
+	http.HandleFunc("/api/stream", web.StreamHandler(state, cfg))
+	http.HandleFunc("/api/stream/", web.StreamHandler(state, cfg))
+	http.HandleFunc("/ws", web.NewWSHandler(state, cfg))
 
 	PrintGreen(fmt.Sprintf("UI: http://%s:%s", web.GetLocalIP(), cfg.Port))
 	log.Fatal(http.ListenAndServe("0.0.0.0:"+cfg.Port, nil))

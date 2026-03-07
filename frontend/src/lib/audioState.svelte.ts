@@ -21,10 +21,10 @@ export interface AppStatus {
 }
 
 class AudioState {
+    // Runes for reactive state
     isRunning = $state(false);
     isRecording = $state(false);
     wsConnected = $state(false);
-    isPrimary = $state(false);
     devices = $state<Device[]>([]);
     selectedDeviceId = $state(0);
     chL = $state(0);
@@ -33,19 +33,23 @@ class AudioState {
     storageLocation = $state("");
     cloudDriveLocation = $state("");
 
+    // Auth and Routing state
+    isAuthenticated = $state(false);
+    wasKicked = $state(false);
+    currentView = $state<"landing" | "stream" | "admin">("landing");
+    
     #ws: WebSocket | null = null;
     onMessage: ((dv: DataView) => void) | null = null;
 
     constructor() {
+        this.isAuthenticated = !!localStorage.getItem("admin_password");
         this.fetchDevices();
-        this.connectWebSocket();
     }
 
     async fetchDevices() {
         try {
             const res = await fetch("/api/devices");
             this.devices = await res.json();
-            console.log("Fetched devices:", this.devices.length, this.devices);
         } catch (e) {
             console.error("Error loading devices", e);
         }
@@ -54,6 +58,10 @@ class AudioState {
     async syncStatus() {
         try {
             const res = await fetch("/api/status");
+            if (res.status === 401) {
+                this.logout();
+                return;
+            }
             const status: AppStatus = await res.json();
             this.isRunning = status.isRunning;
             this.isRecording = status.isRecording;
@@ -69,73 +77,64 @@ class AudioState {
     }
 
     connectWebSocket() {
+        console.log("Attempting WebSocket connection...");
+        if (this.#ws && (this.#ws.readyState === WebSocket.OPEN || this.#ws.readyState === WebSocket.CONNECTING)) {
+            console.log("WebSocket already open or connecting, skipping.");
+            return;
+        }
+        
+        this.wasKicked = false;
+
         const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-        this.#ws = new WebSocket(`${protocol}${window.location.host}/ws`);
+        let url = `${protocol}${window.location.host}/ws`;
+        
+        const pass = localStorage.getItem("admin_password");
+        if (pass) {
+            url += `?pass=${pass}`;
+        } else {
+            console.warn("WebSocket attempted aborted: no admin password in storage");
+            return;
+        }
+
+        console.log("Opening new WebSocket to:", url.split('?')[0]); // Hide pass in log
+        this.#ws = new WebSocket(url);
         this.#ws.binaryType = "arraybuffer";
 
         this.#ws.onopen = () => {
-            console.log("WebSocket connected");
+            console.log(`WebSocket connected successfully`);
             this.wsConnected = true;
         };
 
         this.#ws.onmessage = (event: MessageEvent) => {
-            // Handle both state updates and audio data
             if (event.data instanceof ArrayBuffer) {
-                // Audio data - Binary Protocol Format (Little Endian):
-                //   Offset  Size  Field       Type      Description
-                //   ------  ----  -----       ----      -----------
-                //   0       4     maxL        float32   Peak level for left channel [0.0 to 1.0]
-                //   4       4     maxR        float32   Peak level for right channel [0.0 to 1.0]
-                //   8+      4*N   audioData   float32[] Stereo audio samples, interleaved [L, R, L, R, ...]
                 if (this.onMessage) {
-                    const dv = new DataView(event.data as ArrayBuffer);
+                    const dv = new DataView(event.data);
                     this.onMessage(dv);
                 }
             } else {
-                // State update - JSON format:
-                // {
-                //   "type": "state",
-                //   "isRunning": bool,
-                //   "isRecording": bool,
-                //   "isPrimary": bool,
-                //   "deviceId": int,
-                //   "chL": int,
-                //   "chR": int,
-                //   "boost": float64,
-                //   "storageLocation": string,
-                //   "cloudDriveLocation": string
-                // }
                 try {
-                    const message = JSON.parse(event.data);
-                    if (message.type === "state") {
-                        const oldIsRecording = this.isRecording;
-                        this.isRunning = message.isRunning;
-                        this.isRecording = message.isRecording;
-                        this.isPrimary = message.isPrimary;
-                        this.selectedDeviceId = message.deviceId;
-                        this.chL = message.chL;
-                        this.chR = message.chR;
-                        this.boost = message.boost;
-                        this.storageLocation = message.storageLocation;
-                        this.cloudDriveLocation = message.cloudDriveLocation;
-
-                        // Log recording state changes
-                        if (oldIsRecording !== message.isRecording) {
-                            console.log(`[STATE] Recording changed: ${oldIsRecording} -> ${message.isRecording}`);
-                        }
-                    } else {
-                        console.warn(`[STATE] Unknown message type: ${message.type}`);
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === "kickout") {
+                        console.warn("Kicked out by another admin session signal received!");
+                        this.wasKicked = true;
+                        this.logout();
                     }
                 } catch (e) {
-                    console.error("Failed to parse message:", e, event.data);
+                    // Ignore
                 }
             }
         };
 
-        this.#ws.onclose = () => {
-            console.log("WebSocket closed, retrying...");
+        this.#ws.onclose = (event) => {
+            console.log(`WebSocket closed (Code: ${event.code}, Reason: ${event.reason})`);
             this.wsConnected = false;
-            setTimeout(() => this.connectWebSocket(), 2000);
+            // Only retry if we're still in admin view and NOT kicked
+            if (this.currentView === "admin" && this.isAuthenticated && !this.wasKicked) {
+                console.log("Auto-reconnecting in 2s...");
+                setTimeout(() => this.connectWebSocket(), 2000);
+            } else {
+                console.log("Not reconnecting: view=" + this.currentView + ", auth=" + this.isAuthenticated + ", kicked=" + this.wasKicked);
+            }
         };
 
         this.#ws.onerror = (e) => {
@@ -144,9 +143,30 @@ class AudioState {
         };
     }
 
-    requestPrimaryControl() {
-        if (this.#ws && this.#ws.readyState === WebSocket.OPEN) {
-            this.#ws.send(JSON.stringify({ type: "requestPrimary" }));
+    async login(password: string) {
+        try {
+            const res = await fetch("/api/login", {
+                method: "POST",
+                body: JSON.stringify({ password })
+            });
+            if (res.ok) {
+                localStorage.setItem("admin_password", password);
+                this.isAuthenticated = true;
+                return true;
+            }
+            return false;
+        } catch (e) {
+            console.error("Login error", e);
+            return false;
+        }
+    }
+
+    logout() {
+        localStorage.removeItem("admin_password");
+        this.isAuthenticated = false;
+        if (this.#ws) {
+            this.#ws.close();
+            this.#ws = null;
         }
     }
 }

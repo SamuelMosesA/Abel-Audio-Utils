@@ -20,6 +20,10 @@
             await audioConfig.stopTranslation(lang);
         }
     }
+
+    async function toggleMaster() {
+        await audioConfig.setGeminiMaster(!audioState.geminiMasterEnabled);
+    }
 </script>
 
 <SimpleCard class="space-y-6 md:space-y-8 text-white">
@@ -28,8 +32,18 @@
             <Languages class="w-4 h-4 text-primary" />
             <span class="text-xs font-black uppercase tracking-widest">Active Translations</span>
         </div>
-        <div class="px-3 py-1 bg-primary/10 border border-primary/20 rounded-full text-[10px] font-black uppercase tracking-wider text-primary">
-            {audioState.translations.length} Sessions
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all {audioState.geminiMasterEnabled ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}">
+                <span class="w-1.5 h-1.5 rounded-full {audioState.geminiMasterEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}"></span>
+                <span class="text-[10px] font-black uppercase tracking-wider">Gemini API: {audioState.geminiMasterEnabled ? 'Active' : 'Disabled'}</span>
+            </div>
+            <SimpleButton 
+                variant={audioState.geminiMasterEnabled ? "destructive" : "primary"}
+                class="h-8 px-4 text-[10px]"
+                onclick={toggleMaster}
+            >
+                {audioState.geminiMasterEnabled ? 'Disable Gemini' : 'Enable Gemini'}
+            </SimpleButton>
         </div>
     </div>
 
@@ -53,6 +67,10 @@
                             <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
                                 <Users class="w-3 h-3" />
                                 <span>External Feed</span>
+                                {#if session.subtitles}
+                                    <span class="mx-1">•</span>
+                                    <span class="text-primary font-bold">Subtitles ON</span>
+                                {/if}
                             </div>
                         </div>
                     </div>

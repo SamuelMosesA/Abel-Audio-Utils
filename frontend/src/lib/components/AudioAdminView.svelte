@@ -24,17 +24,32 @@
     import { onMount } from "svelte";
 
     let selectedDeviceValue = $state<string | undefined>(undefined);
+    let isSyncing = false;
 
     onMount(() => {
         audioState.currentView = "admin";
         if (audioState.selectedDeviceId >= 0) {
+            isSyncing = true;
             selectedDeviceValue = audioState.selectedDeviceId.toString();
         }
         audioState.connectWebSocket();
     });
 
+    // Sync external state updates into the local dropdown value
+    $effect(() => {
+        if (audioState.selectedDeviceId >= 0 && selectedDeviceValue !== audioState.selectedDeviceId.toString()) {
+            isSyncing = true;
+            selectedDeviceValue = audioState.selectedDeviceId.toString();
+        }
+    });
+
+    // Send selection to server ONLY when user manually changes the local dropdown
     $effect(() => {
         if (!selectedDeviceValue) return;
+        if (isSyncing) {
+            isSyncing = false;
+            return;
+        }
         const id = Number(selectedDeviceValue);
         if (id !== audioState.selectedDeviceId) {
             audioConfig.connectDevice(id);

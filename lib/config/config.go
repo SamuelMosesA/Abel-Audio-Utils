@@ -16,8 +16,9 @@ type Config struct {
 	DefaultChR         int     `yaml:"default_ch_r"`
 	DefaultBoost       float64 `yaml:"default_boost"`
 	AdminPassword      string  `yaml:"admin_password"`
-	GeminiAPIKey       string  `yaml:"gemini_api_key"`
-	GeminiModel        string  `yaml:"gemini_model"`
+	GeminiAPIKey          string  `yaml:"gemini_api_key"`
+	GeminiModel           string  `yaml:"gemini_model"`
+	GeminiChunkMultiplier int     `yaml:"gemini_chunk_multiplier"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -39,6 +40,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.GeminiModel == "" {
 		cfg.GeminiModel = "models/gemini-2.0-flash-exp" // Default model
+	}
+	if cfg.GeminiChunkMultiplier <= 0 {
+		cfg.GeminiChunkMultiplier = 1
 	}
 
 	return &cfg, nil

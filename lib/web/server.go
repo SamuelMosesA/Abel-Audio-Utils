@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -91,13 +92,15 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 		}
 
 		type Req struct {
-			Action   string
-			DeviceID int
-			ChL      *int
-			ChR      *int
-			Folder   string
-			Boost    *float64
-			Language string
+			Action    string
+			DeviceID  int
+			ChL       *int
+			ChR       *int
+			Folder    string
+			Boost     *float64
+			Language  string
+			Subtitles bool
+			Enabled   *bool
 		}
 		var req Req
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -192,7 +195,17 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 			}
 		} else if req.Action == "stop_translation" {
 			if state.Translator != nil && req.Language != "" {
-				state.Translator.StopSession(req.Language)
+				state.Translator.StopSession(req.Language, req.Subtitles)
+			}
+		} else if req.Action == "gemini_master" {
+			if req.Enabled != nil {
+				state.GeminiEnabled.Store(*req.Enabled)
+				if state.Translator != nil {
+					state.Translator.SetEnabled(*req.Enabled)
+					if !*req.Enabled {
+						state.Translator.CloseAll()
+					}
+				}
 			}
 		}
 	}
@@ -201,28 +214,30 @@ func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFu
 func NewStatusHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := struct {
-			IsRunning          bool                `json:"isRunning"`
-			IsRecording        bool                `json:"isRecording"`
-			ChL                int                 `json:"chL"`
-			ChR                int                 `json:"chR"`
-			Boost              float64             `json:"boost"`
-			DeviceId           int                 `json:"deviceId"`
-			StorageLocation    string              `json:"storageLocation"`
-			CloudDriveLocation string              `json:"cloudDriveLocation"`
-			Translations       []types.SessionInfo `json:"translations"`
-			ServerURL          string              `json:"serverUrl"`
-			SSID               string              `json:"ssid"`
+			IsRunning           bool                `json:"isRunning"`
+			IsRecording         bool                `json:"isRecording"`
+			ChL                 int                 `json:"chL"`
+			ChR                 int                 `json:"chR"`
+			Boost               float64             `json:"boost"`
+			DeviceId            int                 `json:"deviceId"`
+			StorageLocation     string              `json:"storageLocation"`
+			CloudDriveLocation  string              `json:"cloudDriveLocation"`
+			Translations        []types.SessionInfo `json:"translations"`
+			ServerURL           string              `json:"serverUrl"`
+			SSID                string              `json:"ssid"`
+			GeminiMasterEnabled bool                `json:"geminiMasterEnabled"`
 		}{
-			IsRunning:          state.IsRunning.Load(),
-			IsRecording:        state.IsRecording.Load(),
-			ChL:                int(state.ChLeft.Load()),
-			ChR:                int(state.ChRight.Load()),
-			Boost:              state.GetBoost(),
-			DeviceId:           int(state.DeviceID.Load()),
-			StorageLocation:    state.StorageLocation,
-			CloudDriveLocation: state.CloudDriveLocation,
-			ServerURL:          fmt.Sprintf("http://%s:%s", GetLocalIP(), cfg.Port),
-			SSID:               GetWiFiSSID(),
+			IsRunning:           state.IsRunning.Load(),
+			IsRecording:         state.IsRecording.Load(),
+			ChL:                 int(state.ChLeft.Load()),
+			ChR:                 int(state.ChRight.Load()),
+			Boost:               state.GetBoost(),
+			DeviceId:            int(state.DeviceID.Load()),
+			StorageLocation:     state.StorageLocation,
+			CloudDriveLocation:  state.CloudDriveLocation,
+			ServerURL:           fmt.Sprintf("http://%s:%s", GetLocalIP(), cfg.Port),
+			SSID:                GetWiFiSSID(),
+			GeminiMasterEnabled: state.GeminiEnabled.Load(),
 		}
 		if state.Translator != nil {
 			status.Translations = state.Translator.ListSessions()
@@ -432,6 +447,71 @@ func StreamHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 				}
 			case <-r.Context().Done():
 				return
+			}
+		}
+	}
+}
+
+func SubtitlesHandler(state *types.AppState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		lang := r.URL.Query().Get("lang")
+		if lang == "" || lang == "default" {
+			lang = "English"
+		}
+
+		log.Printf("[SERVER] Subtitles connection requested for lang: %s (IP: %s)", lang, r.RemoteAddr)
+
+		if state.Translator == nil {
+			log.Printf("[SERVER] Subtitles handler aborted: Translator is nil")
+			http.Error(w, "Translation not available", 503)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		ch, cleanup := state.Translator.GetSubtitles(lang)
+		if ch == nil {
+			log.Printf("[SERVER] Failed to get subtitle channel for lang: %s", lang)
+			http.Error(w, "Failed to get subtitle channel", 500)
+			return
+		}
+		defer func() {
+			log.Printf("[SERVER] Subtitles connection closed for lang: %s", lang)
+			cleanup()
+		}()
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", 500)
+			return
+		}
+
+		// Initial keep-alive or state check
+		if !state.GeminiEnabled.Load() {
+			fmt.Fprintf(w, "data: %s\n\n", `{"error": "Gemini Master Switch is OFF"}`)
+			flusher.Flush()
+		}
+
+		for {
+			select {
+			case text, ok := <-ch:
+				if !ok {
+					log.Printf("[SERVER] Subtitles channel closed for lang: %s", lang)
+					return
+				}
+				log.Printf("[SERVER] Sending subtitle to %s: %s", lang, text)
+				payload, _ := json.Marshal(map[string]string{"text": text})
+				fmt.Fprintf(w, "data: %s\n\n", string(payload))
+				flusher.Flush()
+			case <-r.Context().Done():
+				return
+			case <-time.After(30 * time.Second):
+				// Keep-alive
+				fmt.Fprintf(w, ": keep-alive\n\n")
+				flusher.Flush()
 			}
 		}
 	}

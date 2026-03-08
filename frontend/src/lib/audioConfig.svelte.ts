@@ -32,7 +32,15 @@ class AudioConfig {
     async stopTranslation(language: string) {
         await fetchWithSync("/api/control", {
             method: "POST",
-            body: JSON.stringify({ action: "stop_translation", language })
+            body: JSON.stringify({ action: "stop_translation", language, subtitles: true })
+        });
+        await audioState.syncStatus();
+    }
+
+    async setGeminiMaster(enabled: boolean) {
+        await fetchWithSync("/api/control", {
+            method: "POST",
+            body: JSON.stringify({ action: "gemini_master", Enabled: enabled })
         });
         await audioState.syncStatus();
     }

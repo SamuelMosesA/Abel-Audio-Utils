@@ -1,4 +1,7 @@
 recordings/
 cloud_drive/
-frontend/.svelte-kit
 static/
+behringer-recorder
+config.yaml
+frontend/.svelte-kit/generated/
+frontend/.svelte-kit/output/

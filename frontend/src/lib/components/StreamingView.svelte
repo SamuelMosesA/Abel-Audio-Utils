@@ -5,10 +5,17 @@
     import * as Card from "$lib/components/ui/card/index.js";
     import { Button } from "$lib/components/ui/button/index.js";
     import { ChevronLeft, Volume2, Waves, Globe } from "lucide-svelte";
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
+    import { fade, fly } from "svelte/transition";
 
     let selectedLang = $state("default");
+    let showSubtitles = $state(false);
+    let subtitleState = $state({ tokenList: [] as {id: string, text: string}[] });
     let audioSource = $derived(`/api/stream/${selectedLang}`);
+    
+    let eventSource: EventSource | null = null;
+    let scrollContainerRef = $state<HTMLElement | null>(null);
+    let autoScrollEnabled = $state(true);
 
     const languages = [
         { id: "default", name: "Original (English)" },
@@ -28,7 +35,81 @@
 
     onMount(() => {
         audioState.currentView = "stream";
+        audioState.syncStatus();
+        
+        const interval = setInterval(() => {
+            audioState.syncStatus();
+        }, 5000);
+        
+        return () => {
+            clearInterval(interval);
+            if (eventSource) eventSource.close();
+        };
     });
+
+    $effect(() => {
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+        
+        if (showSubtitles && audioState.geminiMasterEnabled) {
+            eventSource = new EventSource(`/api/subtitles?lang=${selectedLang}`);
+            eventSource.onmessage = async (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.error) {
+                        subtitleState.tokenList = [...subtitleState.tokenList, { id: Math.random().toString(), text: `[Notice] ${data.error}` }];
+                    } else if (data.text) {
+                        const newTokens = [{
+                            id: Math.random().toString(36).substring(2), 
+                            text: data.text 
+                        }];
+                        
+                        let updatedTokens = [...subtitleState.tokenList, ...newTokens];
+                        subtitleState.tokenList = updatedTokens;
+                        console.log(subtitleState.tokenList);
+                        
+                        await tick();
+                        if (scrollContainerRef && autoScrollEnabled) {
+                            scrollContainerRef.scrollTop = scrollContainerRef.scrollHeight;
+                        }
+                    }
+                } catch (err) {
+                    console.error("Subtitle parse error:", err, e.data);
+                }
+            };
+            eventSource.onerror = () => {
+                subtitleState.tokenList = [...subtitleState.tokenList, { id: "error", text: "Connection lost. Reconnecting..." }];
+            };
+        } else {
+            subtitleState.tokenList = [];
+        }
+    });
+
+    function toggleSubtitles() {
+        showSubtitles = !showSubtitles;
+    }
+
+    function handleScroll(e: Event) {
+        if (!scrollContainerRef) return;
+        
+        const target = e.target as HTMLElement;
+        const isAtBottom = Math.abs(target.scrollHeight - target.clientHeight - target.scrollTop) < 10;
+        
+        if (!isAtBottom) {
+            autoScrollEnabled = false;
+        } else {
+            autoScrollEnabled = true;
+        }
+    }
+    
+    function resumeAutoScroll() {
+        autoScrollEnabled = true;
+        if (scrollContainerRef) {
+            scrollContainerRef.scrollTop = scrollContainerRef.scrollHeight;
+        }
+    }
 </script>
 
 <div class="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -70,12 +151,26 @@
                             <option value={lang.id}>{lang.name}</option>
                         {/each}
                     </select>
-                    {#if selectedLang !== 'default'}
-                        <p class="text-[10px] text-primary/80 animate-pulse font-medium">
-                            ✨ Real-time AI translation active
-                        </p>
-                    {/if}
-                </div>
+                        <div class="flex flex-col gap-2">
+                            <p class="text-[10px] text-primary/80 animate-pulse font-medium">
+                                {#if selectedLang !== 'default'}
+                                    ✨ Real-time AI translation active
+                                {:else}
+                                    ✨ Live transcription active
+                                {/if}
+                            </p>
+                            
+                            <button 
+                                class="flex items-center gap-2 group w-fit"
+                                onclick={toggleSubtitles}
+                            >
+                                <div class="w-8 h-4 rounded-full border border-border/60 p-0.5 transition-colors {showSubtitles ? 'bg-primary border-primary' : 'bg-muted'} relative">
+                                    <div class="absolute top-0.5 bottom-0.5 w-3 rounded-full bg-white transition-all {showSubtitles ? 'right-0.5' : 'left-0.5'} shadow-sm"></div>
+                                </div>
+                                <span class="text-[10px] font-bold uppercase tracking-wider {showSubtitles ? 'text-primary' : 'text-muted-foreground'}">Subtitles</span>
+                            </button>
+                        </div>
+                    </div>
 
                 <!-- Background Audio Stream -->
                 <div class="flex flex-col items-center gap-6 w-full">
@@ -93,7 +188,92 @@
                         Works in background and on lock screen
                     </p>
                 </div>
+
+                <!-- Subtitles Area -->
+                {#if showSubtitles}
+                    <div class="w-full max-w-lg mt-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <div class="bg-black/60 border border-border/40 backdrop-blur-md rounded-2xl p-6 shadow-xl relative overflow-hidden group">
+                            <!-- Status bar -->
+                            <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary/20 via-primary to-primary/20 opacity-40 group-hover:opacity-100 transition-opacity"></div>
+                            
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-primary/60">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+                                    Live Subtitles ({languages.find(l => l.id === selectedLang)?.name || selectedLang})
+                                </div>
+                                <div class="text-[10px] text-muted-foreground font-medium italic">
+                                    {subtitleState.tokenList.length} tokens
+                                </div>
+                            </div>
+                            <div 
+                                class="h-[320px] custom-scrollbar overflow-y-auto relative" 
+                                id="subtitle-container" 
+                                bind:this={scrollContainerRef}
+                                onscroll={handleScroll}
+                            >
+                                {#if !audioState.geminiMasterEnabled}
+                                    <div class="h-full flex items-center justify-center">
+                                        <p class="text-sm text-red-400/80 font-medium italic">
+                                            Live translation is currently disabled by administrator.
+                                        </p>
+                                    </div>
+                                {:else if subtitleState.tokenList.length === 0}
+                                    <div class="h-full flex items-center justify-center">
+                                        <div class="flex items-center gap-3">
+                                            <div class="flex gap-1">
+                                                <div class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.3s]"></div>
+                                                <div class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.15s]"></div>
+                                                <div class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce"></div>
+                                            </div>
+                                            <p class="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-widest mt-0.5">
+                                                Listening...
+                                            </p>
+                                        </div>
+                                    </div>
+                                {:else}
+                                    <div class="w-full h-full text-left">
+                                        {#each subtitleState.tokenList as item (item.id)}
+                                            <span 
+                                                in:fly={{ y: 5, duration: 200 }}
+                                                class="inline whitespace-pre-wrap text-base md:text-xl font-black tracking-tight leading-relaxed text-white drop-shadow-lg"
+                                            >{item.text}</span>
+                                        {/each}
+                                    </div>
+                                {/if}
+                            </div>
+                            
+                            <!-- Resume Auto-scroll Button -->
+                            {#if !autoScrollEnabled}
+                                <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-10" in:fade={{ duration: 150 }} out:fade={{ duration: 150 }}>
+                                    <button 
+                                        class="bg-primary/90 hover:bg-primary text-black text-xs font-bold px-4 py-1.5 rounded-full shadow-lg backdrop-blur-md transition-all flex items-center gap-2"
+                                        onclick={resumeAutoScroll}
+                                    >
+                                        <span class="w-2 h-2 rounded-full bg-black animate-pulse"></span>
+                                        Resume scroll
+                                    </button>
+                                </div>
+                            {/if}
+                            
+                            <!-- Bottom Gradient for focus -->
+                            <div class="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-black/80 to-transparent pointer-events-none"></div>
+                        </div>
+                    </div>
+                {/if}
             </div>
         </Card.Content>
     </Card.Root>
 </div>
+
+<style>
+    :global(.custom-scrollbar::-webkit-scrollbar) {
+        width: 4px;
+    }
+    :global(.custom-scrollbar::-webkit-scrollbar-track) {
+        background: transparent;
+    }
+    :global(.custom-scrollbar::-webkit-scrollbar-thumb) {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+    }
+</style>

@@ -59,6 +59,8 @@ func main() {
 			fmt.Printf("[GEMINI] Warning: Failed to init Translation Manager: %v\n", err)
 		} else {
 			state.Translator = tm
+			state.Translator.SetEnabled(true)
+			state.GeminiEnabled.Store(true)
 			fmt.Printf("[GEMINI] Translation enabled using model: %s\n", cfg.GeminiModel)
 		}
 	}
@@ -71,7 +73,7 @@ func main() {
 	}
 
 	// Start workers
-	web.StartAudioBroadcaster(state, state.PlaybackChan)
+	web.StartAudioBroadcaster(state, cfg, state.PlaybackChan)
 	portaudio.StartStorageWorker(state, state.RecordChan)
 
 	// 1. Static Assets (JS, CSS, etc.)
@@ -101,6 +103,7 @@ func main() {
 	http.HandleFunc("/api/login", web.LoginHandler(cfg))
 	http.HandleFunc("/api/stream", web.StreamHandler(state, cfg))
 	http.HandleFunc("/api/stream/", web.StreamHandler(state, cfg))
+	http.HandleFunc("/api/subtitles", web.SubtitlesHandler(state))
 	http.HandleFunc("/ws", web.NewWSHandler(state, cfg))
 
 	PrintGreen(fmt.Sprintf("UI: http://%s:%s", web.GetLocalIP(), cfg.Port))

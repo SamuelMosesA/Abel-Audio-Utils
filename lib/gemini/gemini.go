@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/genai"
@@ -14,16 +16,19 @@ import (
 type TranslationSession struct {
 	Language string
 	AudioIn  chan []byte // PCM 16kHz Mono bytes
-	AudioOut chan []float32
-	ctx      context.Context
-	cancel   context.CancelFunc
+	AudioOut  chan []float32
+	Subtitles bool
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 type TranslationManager struct {
 	client *genai.Client
 	model  string
+	Enabled atomic.Bool
 	
 	sessions sync.Map // map[string]*TranslationSession
+	subscribers sync.Map // map[string][]chan string
 	mu       sync.Mutex
 }
 
@@ -50,13 +55,20 @@ func NewTranslationManager(apiKey, model string) (*TranslationManager, error) {
 }
 
 func (m *TranslationManager) GetChannel(language string) chan []float32 {
-	log.Printf("[GEMINI] Getting channel for language: %s", language)
-	if language == "" || language == "default" {
-		return nil
+	return m.GetChannels(language, false)
+}
+
+func (m *TranslationManager) GetChannels(language string, subtitles bool) chan []float32 {
+	if language == "" {
+		language = "default"
 	}
+	log.Printf("[GEMINI] Getting channel for language index: %s (subtitlesRequested: %v)", language, subtitles)
 
 	if val, ok := m.sessions.Load(language); ok {
-		return val.(*TranslationSession).AudioOut
+		s := val.(*TranslationSession)
+		// If we already have a session but with different subtitle setting, we might need to restart it
+		// or just accept it as is. For now, if it exists, return it.
+		return s.AudioOut
 	}
 
 	m.mu.Lock()
@@ -71,17 +83,59 @@ func (m *TranslationManager) GetChannel(language string) chan []float32 {
 	audioIn := make(chan []byte, 100)
 	ctx, cancel := context.WithCancel(context.Background())
 	session := &TranslationSession{
-		Language: language,
-		AudioIn:  audioIn,
-		AudioOut: audioOut,
-		ctx:      ctx,
-		cancel:   cancel,
+		Language:  language,
+		AudioIn:   audioIn,
+		AudioOut:  audioOut,
+		Subtitles: subtitles,
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 	m.sessions.Store(language, session)
 
 	go m.runSession(session)
 
 	return audioOut
+}
+
+func (m *TranslationManager) GetSubtitles(language string) (chan string, func()) {
+	if language == "" {
+		language = "default"
+	}
+
+	// Ensure session exists
+	m.GetChannels(language, true)
+
+	subCh := make(chan string, 10)
+	m.mu.Lock()
+	var subs []chan string
+	if val, ok := m.subscribers.Load(language); ok {
+		subs = val.([]chan string)
+	}
+	subs = append(subs, subCh)
+	m.subscribers.Store(language, subs)
+	m.mu.Unlock()
+
+	cleanup := func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if val, ok := m.subscribers.Load(language); ok {
+			oldSubs := val.([]chan string)
+			newSubs := make([]chan string, 0, len(oldSubs))
+			for _, ch := range oldSubs {
+				if ch != subCh {
+					newSubs = append(newSubs, ch)
+				}
+			}
+			if len(newSubs) == 0 {
+				m.subscribers.Delete(language)
+			} else {
+				m.subscribers.Store(language, newSubs)
+			}
+		}
+		close(subCh)
+	}
+
+	return subCh, cleanup
 }
 
 func (m *TranslationManager) CloseAll() {
@@ -99,14 +153,15 @@ func (m *TranslationManager) ListSessions() []types.SessionInfo {
 		lang := key.(string)
 		list = append(list, types.SessionInfo{
 			Language:  lang,
-			Listeners: 0, // Simplified: not tracking individual stream listeners anymore
+			Listeners: 0, // Simplified
+			Subtitles: value.(*TranslationSession).Subtitles,
 		})
 		return true
 	})
 	return list
 }
 
-func (m *TranslationManager) StopSession(language string) {
+func (m *TranslationManager) StopSession(language string, subtitles bool) {
 	log.Printf("[GEMINI] Force stopping session for %s", language)
 	if val, ok := m.sessions.Load(language); ok {
 		val.(*TranslationSession).cancel()
@@ -114,13 +169,29 @@ func (m *TranslationManager) StopSession(language string) {
 }
 
 func (m *TranslationManager) runSession(s *TranslationSession) {
+	log.Printf("[GEMINI] runSession started for language: %s, model: %s", s.Language, m.model)
+	defer log.Printf("[GEMINI] runSession exited for language: %s", s.Language)
 	defer m.sessions.Delete(s.Language)
-	defer close(s.AudioOut)
 
 	log.Printf("[GEMINI] Starting translation session for %s", s.Language)
 
+	modalities := []genai.Modality{genai.ModalityAudio}
+
+	targetLang := s.Language
+	if targetLang == "default" || targetLang == "" {
+		targetLang = "English"
+	}
+
+	// Simple capitalization
+	displayLang := targetLang
+	if len(displayLang) > 0 {
+		displayLang = strings.ToUpper(displayLang[:1]) + displayLang[1:]
+	}
+
 	config := &genai.LiveConnectConfig{
-		ResponseModalities: []genai.Modality{genai.ModalityAudio},
+		ResponseModalities: modalities,
+		InputAudioTranscription:  &genai.AudioTranscriptionConfig{},
+		OutputAudioTranscription: &genai.AudioTranscriptionConfig{},
 		RealtimeInputConfig: &genai.RealtimeInputConfig{
 			ActivityHandling: genai.ActivityHandlingNoInterruption,
 			TurnCoverage:     genai.TurnCoverageTurnIncludesAllInput,
@@ -128,20 +199,35 @@ func (m *TranslationManager) runSession(s *TranslationSession) {
 		SpeechConfig: &genai.SpeechConfig{
 			VoiceConfig: &genai.VoiceConfig{
 				PrebuiltVoiceConfig: &genai.PrebuiltVoiceConfig{
-					VoiceName: "Puck",
+					VoiceName: "Kore",
 				},
 			},
 		},
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{
-				genai.NewPartFromText(fmt.Sprintf(`I will send a live audio stream of a sermon in English. The church is located in Amsterdam. It is a reformed baptist tradition. So try to understand the theological concepts and find the apt way to explain in the target language.
-You are to translate to the language %[1]s.
-Only output the translated audio. NEVER output text. Do not add any extra comments or explanations. 
-Do not stop your output in the translated language if the person starts talking again. You must output side by side with the English audio.
-Try to understand the idioms and phrases and cultural contexts of British and American english speaker and translate the meaning as an explanation in language %[1]s. For example
-"out of shape" is translated to something like unfit etc`, s.Language)),
+				func() *genai.Part {
+					if displayLang == "English" {
+						return genai.NewPartFromText(`You are a professional real-time transcriber. 
+Your task: Transcribe the incoming English audio stream into English text.
+
+Rules:
+1. Output ONLY the English transcription.
+2. The sermon is from a reformed baptist tradition in Amsterdam; use appropriate theological terminology.
+3. If there is silence or no speech, remain silent.`)
+					}
+					return genai.NewPartFromText(fmt.Sprintf(`You are a professional real-time translator. 
+Your task: Translate the incoming English audio stream into %s.
+
+Rules:
+1. Output ONLY the %s translation audio/text.
+2. NEVER output English or extra comments.
+3. The sermon is from a reformed baptist tradition in Amsterdam; use appropriate theological terminology in %s.
+4. If there is silence or no speech, remain silent.
+5. Pay attention to the pauses and try not to rush the pauses.
+6. Avoid complex and less used words in the language.
+7. For languages which take more time to convey the same meaning, speak faster`, displayLang, displayLang, displayLang))
+				}(),
 			},
-			Role: "system",
 		},
 	}
 
@@ -154,29 +240,39 @@ Try to understand the idioms and phrases and cultural contexts of British and Am
 		return
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(1)
+	receiveLoopCtx, receiveLoopCancel := context.WithCancel(ctx)
+
 	// Receive loop
 	go func() {
+		defer wg.Done()
+		defer receiveLoopCancel()
 		for {
 			resp, err := liveSession.Receive()
 			if err != nil {
 				log.Printf("[GEMINI] Session %s receive error: %v", s.Language, err)
-				s.cancel()
 				return
 			}
+			// log.Printf("[GEMINI] Session %s received message", s.Language) // Too noisy
 			if resp.ServerContent != nil {
 				if resp.ServerContent.ModelTurn != nil {
 					log.Printf("[GEMINI] Session %s received model turn with %d parts", s.Language, len(resp.ServerContent.ModelTurn.Parts))
 					for _, part := range resp.ServerContent.ModelTurn.Parts {
 						if part.InlineData != nil {
 							pcmData := part.InlineData.Data
-							log.Printf("[GEMINI] Session %s received %d bytes of audio data", s.Language, len(pcmData))
 							floatData := convertInt16ToFloat32(pcmData)
-							s.AudioOut <- floatData
-						}
-						if part.Text != "" {
-							log.Printf("[GEMINI] Session %s received text: %s", s.Language, part.Text)
+							select {
+							case s.AudioOut <- floatData:
+							default:
+								// Drop if nobody is listening
+							}
 						}
 					}
+				}
+				if ot := resp.ServerContent.OutputTranscription; ot != nil && ot.Text != "" {
+					log.Printf("[GEMINI] Session %s -> OutputTranscription: %s", s.Language, ot.Text)
+					m.broadcastSubtitle(s.Language, ot.Text)
 				}
 				if resp.ServerContent.TurnComplete {
 					log.Printf("[GEMINI] Session %s turn complete", s.Language)
@@ -197,6 +293,7 @@ Try to understand the idioms and phrases and cultural contexts of British and Am
 	// Send loop
 	lastSend := time.Now()
 	sendCount := 0
+Loop:
 	for {
 		select {
 		case data := <-s.AudioIn:
@@ -208,8 +305,7 @@ Try to understand the idioms and phrases and cultural contexts of British and Am
 			})
 			if err != nil {
 				log.Printf("[GEMINI] Session %s send error: %v", s.Language, err)
-				s.cancel()
-				return
+				break Loop
 			}
 			sendCount++
 			if time.Since(lastSend) > 5*time.Second {
@@ -225,13 +321,38 @@ Try to understand the idioms and phrases and cultural contexts of British and Am
 				lastSend = time.Now()
 			}
 		case <-s.ctx.Done():
-			liveSession.Close()
-			return
+			break Loop
+		case <-receiveLoopCtx.Done():
+			break Loop
+		}
+	}
+
+	liveSession.Close()
+	wg.Wait()
+	close(s.AudioOut)
+}
+
+func (m *TranslationManager) SetEnabled(enabled bool) {
+	m.Enabled.Store(enabled)
+}
+
+func (m *TranslationManager) broadcastSubtitle(language string, text string) {
+	if val, ok := m.subscribers.Load(language); ok {
+		subs := val.([]chan string)
+		for _, ch := range subs {
+			select {
+			case ch <- text:
+			default:
+				// Buffer full
+			}
 		}
 	}
 }
 
 func (m *TranslationManager) PushAudio(chunk []float32) {
+	if !m.Enabled.Load() {
+		return
+	}
 	if len(chunk) == 0 {
 		return
 	}

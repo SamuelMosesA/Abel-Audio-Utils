@@ -1,6 +1,7 @@
 package web
 
 import (
+	"behringerRecorder/lib/config"
 	"behringerRecorder/lib/types"
 	"encoding/binary"
 	"log"
@@ -60,9 +61,12 @@ func CalculatePeakMeters(buffer []float32) (float32, float32) {
 //	  Bytes 12-15: cd cc 9e be (-0.3 as float32 audio sample)
 //	  Bytes 16-19: cd cc cc 3d (0.1 as float32 audio sample)
 //	  Bytes 20-23: cd cc 23 3e (0.2 as float32 audio sample)
-func StartAudioBroadcaster(state *types.AppState, playbackChan <-chan []float32) {
+func StartAudioBroadcaster(state *types.AppState, cfg *config.Config, playbackChan <-chan []float32) {
 	go func() {
 		count := 0
+		geminiChunkCount := 0
+		geminiBuffer := make([]float32, 0, cfg.BufferSize*2*cfg.GeminiChunkMultiplier)
+
 		for chunk := range playbackChan {
 			// Calculate peak meters for the chunk
 			maxL, maxR := CalculatePeakMeters(chunk)
@@ -100,7 +104,13 @@ func StartAudioBroadcaster(state *types.AppState, playbackChan <-chan []float32)
 
 			// Push to Gemini for translation
 			if state.Translator != nil {
-				state.Translator.PushAudio(chunk)
+				geminiBuffer = append(geminiBuffer, chunk...)
+				geminiChunkCount++
+				if geminiChunkCount >= cfg.GeminiChunkMultiplier {
+					state.Translator.PushAudio(geminiBuffer)
+					geminiBuffer = make([]float32, 0, cfg.BufferSize*2*cfg.GeminiChunkMultiplier)
+					geminiChunkCount = 0
+				}
 			}
 
 			count++

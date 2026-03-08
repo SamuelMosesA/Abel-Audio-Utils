@@ -18,6 +18,7 @@ type AppState struct {
 	ChLeft      atomic.Int32
 	ChRight     atomic.Int32
 	Boost       atomic.Uint64 // Storing float64 bits
+	GeminiEnabled atomic.Bool
 
 	File         *os.File
 	SamplesWrote atomic.Int64
@@ -46,14 +47,17 @@ type AppState struct {
 type SessionInfo struct {
 	Language  string `json:"language"`
 	Listeners int    `json:"listeners"`
+	Subtitles bool   `json:"subtitles"`
 }
 
 type Translator interface {
 	GetChannel(language string) chan []float32
+	GetSubtitles(language string) (chan string, func())
 	PushAudio(chunk []float32)
 	CloseAll()
 	ListSessions() []SessionInfo
-	StopSession(language string)
+	StopSession(language string, subtitles bool)
+	SetEnabled(enabled bool)
 }
 
 func (s *AppState) GetBoost() float64 {

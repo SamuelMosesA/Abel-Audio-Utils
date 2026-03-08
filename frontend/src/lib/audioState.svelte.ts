@@ -7,6 +7,7 @@ export interface Device {
 export interface TranslationSession {
     language: string;
     listeners: number;
+    subtitles: boolean;
 }
 
 export interface MeterState {
@@ -26,6 +27,7 @@ export interface AppStatus {
     translations: TranslationSession[];
     serverUrl: string;
     ssid: string;
+    geminiMasterEnabled: boolean;
 }
 
 class AudioState {
@@ -43,6 +45,7 @@ class AudioState {
     translations = $state<TranslationSession[]>([]);
     serverUrl = $state("");
     ssid = $state("");
+    geminiMasterEnabled = $state(true);
 
     // Auth and Routing state
     isAuthenticated = $state(false);
@@ -85,6 +88,7 @@ class AudioState {
             this.translations = status.translations || [];
             this.serverUrl = status.serverUrl;
             this.ssid = status.ssid;
+            this.geminiMasterEnabled = status.geminiMasterEnabled;
         } catch (e) {
             console.error("Error syncing status", e);
         }

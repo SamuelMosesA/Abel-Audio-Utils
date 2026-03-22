@@ -3,6 +3,7 @@ package portaudio
 import (
 	"behringerRecorder/lib/types"
 	"encoding/binary"
+	"io"
 )
 
 // StartStorageWorker starts a goroutine that processes audio chunks and writes them to disk.
@@ -32,26 +33,45 @@ import (
 func StartStorageWorker(state *types.AppState, recordChan <-chan []float32) {
 	go func() {
 		for chunk := range recordChan {
-			if !state.IsRecording.Load() {
+			state.Mu.RLock()
+			isRecording := state.IsRecording
+			file := state.File
+			state.Mu.RUnlock()
+
+			if !isRecording || file == nil {
 				continue
 			}
 
-			state.Mu.Lock()
-			file := state.File
-			if file != nil {
-				// Process pairs of float32 samples (stereo)
-				for i := 0; i < len(chunk); i += 2 {
-					sL, sR := chunk[i], chunk[i+1]
-					// Convert float32 [-1.0, 1.0] to int16 [-32768, 32767]
-					iL, iR := int16(sL*32767), int16(sR*32767)
-					// Write as little-endian int16 values
-					binary.Write(file, binary.LittleEndian, iL)
-					binary.Write(file, binary.LittleEndian, iR)
-				}
-				// Track number of stereo sample pairs written
-				state.SamplesWrote.Add(int64(len(chunk) / 2))
+			n, err := WriteAudio(file, chunk)
+			if err == nil {
+				state.Mu.Lock()
+				state.SamplesWrote += int64(n)
+				state.Mu.Unlock()
 			}
-			state.Mu.Unlock()
 		}
 	}()
 }
+
+// WriteAudio converts float32 stereo chunks to int16 and writes them to the provided writer.
+// Returns the number of stereo samples (pairs) written.
+func WriteAudio(w io.Writer, chunk []float32) (int, error) {
+	if len(chunk) == 0 {
+		return 0, nil
+	}
+
+	// Process pairs of float32 samples (stereo)
+	for i := 0; i < len(chunk)-1; i += 2 {
+		sL, sR := chunk[i], chunk[i+1]
+		// Convert float32 [-1.0, 1.0] to int16 [-32768, 32767]
+		iL, iR := int16(sL*32767), int16(sR*32767)
+		// Write as little-endian int16 values
+		if err := binary.Write(w, binary.LittleEndian, iL); err != nil {
+			return i / 2, err
+		}
+		if err := binary.Write(w, binary.LittleEndian, iR); err != nil {
+			return i / 2, err
+		}
+	}
+	return len(chunk) / 2, nil
+}
+

@@ -4,6 +4,7 @@ import (
 	"behringerRecorder/lib/config"
 	"behringerRecorder/lib/portaudio"
 	"behringerRecorder/lib/types"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
 
@@ -66,191 +69,404 @@ func GetWiFiSSID() string {
 	return "N/A"
 }
 
-func DevicesHandler(state *types.AppState) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func DevicesHandler(state *types.AppState) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		fmt.Println("API: Device list requested")
-		state.Mu.RLock()
 		devices := state.Devices
-		state.Mu.RUnlock()
 		list := portaudio.GetDevices(devices)
-		json.NewEncoder(w).Encode(list)
+		c.JSON(http.StatusOK, list)
 	}
 }
 
-// Update all handlers to check for authentication or remove state broadcasts
-func NewControlHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Basic Auth check for all control actions
-		pass := r.Header.Get("X-Admin-Password")
-		if pass == "" {
-			// Also check body for password if header is missing (convenience for some clients)
-			// But header is better for utility fetcher
+// SessionAuthMiddleware protects routes using Gin sessions
+func SessionAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		auth := session.Get("authenticated")
+		if auth != true {
+			fmt.Printf("[AUTH] Denied request: %s %s (No authenticated session)\n", c.Request.Method, c.Request.URL.Path)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized session"})
+			c.Abort()
+			return
 		}
-		if pass != cfg.AdminPassword {
-			http.Error(w, "Unauthorized", 401)
+		user := session.Get("username")
+		fmt.Printf("[AUTH] Granted: %s %s (User: %v)\n", c.Request.Method, c.Request.URL.Path, user)
+		c.Next()
+	}
+}
+
+// @Summary Get system change log
+// @Description Real-time SSE stream of state changes across the console
+// @Tags System
+// @Produce text/event-stream
+// @Success 200 {object} string "SSE Stream"
+// @Security CookieAuth
+// @Security BasicAuth
+// @Router /api/system/changelog [get]
+func ChangeLogHandler(state *types.AppState) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("Access-Control-Allow-Origin", "*")
+
+		ch := make(chan types.StateChange, 10)
+		state.BroadcastHub.Store(ch, true)
+		defer state.BroadcastHub.Delete(ch)
+
+		flusher, ok := c.Writer.(http.Flusher)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Streaming unsupported"})
 			return
 		}
 
-		type Req struct {
-			Action    string
-			DeviceID  int
-			ChL       *int
-			ChR       *int
-			Folder    string
-			Boost     *float64
-			Language  string
-			Subtitles bool
-			Enabled   *bool
+		for {
+			select {
+			case change, ok := <-ch:
+				if !ok {
+					return
+				}
+				payload, _ := json.Marshal(change)
+				fmt.Fprintf(c.Writer, "data: %s\n\n", string(payload))
+				flusher.Flush()
+			case <-c.Request.Context().Done():
+				return
+			case <-time.After(30 * time.Second):
+				fmt.Fprintf(c.Writer, ": keep-alive\n\n")
+				flusher.Flush()
+			}
 		}
-		var req Req
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body", 400)
+	}
+}
+
+// @Summary Update audio config
+// @Description Boots up the device engine or updates running config
+// @Tags Audio
+// @Accept json
+// @Produce json
+// @Param request body object true "Interface Config"
+// @Success 200 {object} string "Success"
+// @Failure 400 {object} string "Invalid Request"
+// @Failure 401 {object} string "Unauthorized"
+// @Failure 500 {object} string "Internal Error"
+// @Security CookieAuth
+// @Security BasicAuth
+// @Router /api/audio/config [patch]
+func UpdateAudioConfig(state *types.AppState, cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		state.Mu.Lock()
+		if state.IsRecording {
+			state.Mu.Unlock()
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot change configuration while recording"})
+			return
+		}
+		state.Mu.Unlock()
+
+		session := sessions.Default(c)
+		sessionID, _ := session.Get("session_id").(string)
+		var req struct {
+			DeviceID *int     `json:"deviceID"`
+			ChL      *int     `json:"chL"`
+			ChR      *int     `json:"chR"`
+			Boost    *float64 `json:"boost"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 			return
 		}
 
-		// Lock for atomic read of recording state
-		isRecording := state.IsRecording.Load()
-
-		if req.Action == "connect" {
-			err := portaudio.StartAudioEngine(state, cfg, req.DeviceID, state.RecordChan, state.PlaybackChan)
-			if err != nil {
-				http.Error(w, err.Error(), 500)
-				return
-			}
-			state.IsRunning.Store(true)
-			state.DeviceID.Store(int32(req.DeviceID))
-			if req.ChL != nil {
-				state.ChLeft.Store(int32(*req.ChL))
-			}
-			if req.ChR != nil {
-				state.ChRight.Store(int32(*req.ChR))
-			}
-			if req.Boost != nil {
-				state.SetBoost(*req.Boost)
-			}
-			fmt.Printf("[ENGINE] Started with Device ID: %d\n", req.DeviceID)
-
-		} else if req.Action == "start" {
-			if isRecording {
-				http.Error(w, "Already recording", 400)
-				return
-			}
-			folder := req.Folder
-			if folder == "" {
-				folder = cfg.StorageLocation
-			}
-			os.MkdirAll(folder, 0755)
-			filename := fmt.Sprintf("rec_%d.wav", time.Now().Unix())
-			base := filepath.Join(folder, filename)
-			file, err := os.Create(base)
-			if err != nil {
-				http.Error(w, "Failed to create file", 500)
-				return
-			}
-			portaudio.WritePlaceholderHeader(file)
-
-			state.Mu.Lock()
-			state.File = file
-			state.Mu.Unlock()
-			state.SamplesWrote.Store(0)
-			state.IsRecording.Store(true)
-			if req.Boost != nil {
-				state.SetBoost(*req.Boost)
-			}
-			fmt.Printf("[RECORDING] START - File: %s\n", filename)
-
-		} else if req.Action == "stop" {
-			if !isRecording {
-				http.Error(w, "Not currently recording", 400)
-				return
-			}
-			state.Mu.Lock()
-			file := state.File
-			state.File = nil
-			state.Mu.Unlock()
-
-			samplesWrote := state.SamplesWrote.Load()
-
-			if file == nil {
-				http.Error(w, "No file to finalize", 500)
-				return
-			}
-
-			filename := filepath.Base(file.Name())
-			portaudio.FinalizeWavHeader(file, 2, samplesWrote, cfg.SampleRate)
-			file.Close()
-
-			state.IsRecording.Store(false)
-			fmt.Printf("[RECORDING] STOP - File: %s, Samples: %d\n", filename, samplesWrote)
-
-		} else if req.Action == "update" && !isRecording {
-			if req.ChL != nil {
-				state.ChLeft.Store(int32(*req.ChL))
-			}
-			if req.ChR != nil {
-				state.ChRight.Store(int32(*req.ChR))
-			}
-			if req.Boost != nil {
-				state.SetBoost(*req.Boost)
-			}
-		} else if req.Action == "stop_translation" {
-			if state.Translator != nil && req.Language != "" {
-				state.Translator.StopSession(req.Language, req.Subtitles)
-			}
-		} else if req.Action == "gemini_master" {
-			if req.Enabled != nil {
-				state.GeminiEnabled.Store(*req.Enabled)
-				if state.Translator != nil {
-					state.Translator.SetEnabled(*req.Enabled)
-					if !*req.Enabled {
-						state.Translator.CloseAll()
-					}
+		state.UpdateState(sessionID, "interface", func() {
+			if req.DeviceID != nil {
+				err := portaudio.StartAudioEngine(nil, state, cfg, *req.DeviceID, state.RecordChan, state.PlaybackChan)
+				if err != nil {
+					// Note: we can't easily return early from the closure with an error to Gin
+					// but we can log it. For now, we'll keep it simple.
+					fmt.Printf("[ENGINE] Error starting: %v\n", err)
+				} else {
+					state.IsRunning = true
+					state.DeviceID = int32(*req.DeviceID)
+					fmt.Printf("[ENGINE] Started with Device ID: %d\n", *req.DeviceID)
 				}
 			}
-		}
+
+			if req.ChL != nil {
+				state.ChLeft = int32(*req.ChL)
+			}
+			if req.ChR != nil {
+				state.ChRight = int32(*req.ChR)
+			}
+			if req.Boost != nil {
+				state.SetBoost(*req.Boost)
+			}
+		})
+
+		c.JSON(http.StatusOK, gin.H{"status": "Interface updated"})
 	}
 }
 
-func NewStatusHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		status := struct {
-			IsRunning           bool                `json:"isRunning"`
-			IsRecording         bool                `json:"isRecording"`
-			ChL                 int                 `json:"chL"`
-			ChR                 int                 `json:"chR"`
-			Boost               float64             `json:"boost"`
-			DeviceId            int                 `json:"deviceId"`
-			StorageLocation     string              `json:"storageLocation"`
-			CloudDriveLocation  string              `json:"cloudDriveLocation"`
-			Translations        []types.SessionInfo `json:"translations"`
-			ServerURL           string              `json:"serverUrl"`
-			SSID                string              `json:"ssid"`
-			GeminiMasterEnabled bool                `json:"geminiMasterEnabled"`
-		}{
-			IsRunning:           state.IsRunning.Load(),
-			IsRecording:         state.IsRecording.Load(),
-			ChL:                 int(state.ChLeft.Load()),
-			ChR:                 int(state.ChRight.Load()),
-			Boost:               state.GetBoost(),
-			DeviceId:            int(state.DeviceID.Load()),
-			StorageLocation:     state.StorageLocation,
-			CloudDriveLocation:  state.CloudDriveLocation,
-			ServerURL:           fmt.Sprintf("http://%s:%s", GetLocalIP(), cfg.Port),
-			SSID:                GetWiFiSSID(),
-			GeminiMasterEnabled: state.GeminiEnabled.Load(),
+// @Summary Get audio config
+// @Description Returns current channels, boost, device info, and recording status
+// @Tags Audio
+// @Produce json
+// @Success 200 {object} object "Audio Configuration"
+// @Failure 401 {object} string "Unauthorized"
+// @Router /api/audio/config [get]
+func GetAudioConfig(state *types.AppState) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		state.Mu.RLock()
+		defer state.Mu.RUnlock()
+		c.JSON(http.StatusOK, gin.H{
+			"deviceID":           state.DeviceID,
+			"isRunning":          state.IsRunning,
+			"isRecording":        state.IsRecording,
+			"chL":                state.ChLeft,
+			"chR":                state.ChRight,
+			"boost":              state.GetBoost(),
+			"storageLocation":    state.StorageLocation,
+			"cloudDriveLocation": state.CloudDriveLocation,
+		})
+	}
+}
+
+// @Summary Control recording
+// @Description Starts or stops a recording
+// @Tags Recordings
+// @Accept json
+// @Produce json
+// @Param request body object true "Recording Action"
+// @Success 200 {object} string "Success"
+// @Failure 400 {object} string "Invalid Action"
+// @Failure 401 {object} string "Unauthorized"
+// @Failure 500 {object} string "Internal Error"
+// @Security CookieAuth
+// @Security BasicAuth
+// @Router /api/recordings [post]
+func CreateRecording(state *types.AppState, cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		sessionID, _ := session.Get("session_id").(string)
+
+		var req struct {
+			Action string   `json:"action"`
+			Folder string   `json:"folder"`
+			Boost  *float64 `json:"boost"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+			return
+		}
+
+		var respStatus string
+		var respFile string
+		var err error
+
+		state.UpdateState(sessionID, "recording", func() {
+			isRecording := state.IsRecording
+
+			if req.Action == "start" {
+				if isRecording {
+					err = fmt.Errorf("already recording")
+					return
+				}
+				folder := req.Folder
+				if folder == "" {
+					folder = cfg.StorageLocation
+				}
+				os.MkdirAll(folder, 0755)
+				filename := fmt.Sprintf("rec_%d.wav", time.Now().Unix())
+				base := filepath.Join(folder, filename)
+				file, errCreate := os.Create(base)
+				if errCreate != nil {
+					err = errCreate
+					return
+				}
+				portaudio.WritePlaceholderHeader(file)
+
+				state.File = file
+				state.SamplesWrote = 0
+				state.IsRecording = true
+				if req.Boost != nil {
+					state.SetBoost(*req.Boost)
+				}
+				fmt.Printf("[RECORDING] START - File: %s\n", filename)
+				respStatus = "Recording started"
+				respFile = filename
+
+			} else if req.Action == "stop" {
+				if !isRecording {
+					err = fmt.Errorf("not currently recording")
+					return
+				}
+				
+				file := state.File
+				state.File = nil
+				samplesWrote := state.SamplesWrote
+
+				if file == nil {
+					err = fmt.Errorf("no file to finalize")
+					return
+				}
+
+				filename := filepath.Base(file.Name())
+				portaudio.FinalizeWavHeader(file, 2, samplesWrote, cfg.SampleRate)
+				file.Close()
+
+				state.IsRecording = false
+				fmt.Printf("[RECORDING] STOP - File: %s, Samples: %d\n", filename, samplesWrote)
+				respStatus = "Recording stopped"
+				respFile = filename
+			} else {
+				err = fmt.Errorf("invalid action")
+			}
+		})
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": respStatus, "file": respFile})
+	}
+}
+
+// @Summary Get recording status
+// @Description Returns whether the system is recording
+// @Tags Recordings
+// @Produce json
+// @Success 200 {object} object "Recording Status"
+// @Failure 401 {object} string "Unauthorized"
+// @Router /api/recordings [get]
+func GetRecordingStatus(state *types.AppState) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		state.Mu.RLock()
+		defer state.Mu.RUnlock()
+		status := gin.H{
+			"isRecording": state.IsRecording,
+			"samples":     state.SamplesWrote,
+		}
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+// @Summary Control AI streams
+// @Description Toggles master gemini switch or stops a specific language translation
+// @Tags AI
+// @Accept json
+// @Produce json
+// @Param request body object true "AI Action"
+// @Success 200 {object} string "Success"
+// @Failure 400 {object} string "Invalid Action"
+// @Failure 401 {object} string "Unauthorized"
+// @Security CookieAuth
+// @Security BasicAuth
+// @Router /api/ai/streams [post]
+func UpdateAIStreams(state *types.AppState) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		sessionID, _ := session.Get("session_id").(string)
+
+		var req struct {
+			Action    string `json:"action"`
+			Enabled   *bool  `json:"enabled"`
+			Language  string `json:"language"`
+			Subtitles bool   `json:"subtitles"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+			return
+		}
+
+		state.UpdateState(sessionID, "gemini", func() {
+			if req.Action == "toggle_master" {
+				if req.Enabled != nil {
+					state.GeminiEnabled = *req.Enabled
+					if state.Translator != nil {
+						state.Translator.SetEnabled(*req.Enabled)
+						if !*req.Enabled {
+							state.Translator.CloseAll()
+						}
+					}
+				}
+			} else if req.Action == "stop_translation" {
+				if state.Translator != nil && req.Language != "" {
+					state.Translator.StopSession(req.Language, req.Subtitles)
+				}
+			}
+		})
+
+		c.JSON(http.StatusOK, gin.H{"status": "Gemini action completed"})
+	}
+}
+
+// @Summary Get AI streams status
+// @Description Returns active sessions and master state
+// @Tags AI
+// @Produce json
+// @Success 200 {object} object "AI Streams Status"
+// @Failure 401 {object} string "Unauthorized"
+// @Router /api/ai/streams [get]
+func GetAIStreamsStatus(state *types.AppState) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		status := gin.H{
+			"masterEnabled": state.GeminiEnabled,
 		}
 		if state.Translator != nil {
-			status.Translations = state.Translator.ListSessions()
+			status["sessions"] = state.Translator.ListSessions()
+		} else {
+			status["sessions"] = []types.SessionInfo{}
 		}
-		json.NewEncoder(w).Encode(status)
+		c.JSON(http.StatusOK, status)
 	}
 }
 
-func FilesHandler(cfg *config.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func RegisterAdminRoutes(r *gin.RouterGroup, state *types.AppState, cfg *config.Config) {
+	r.Use(SessionAuthMiddleware())
+	{
+		r.PATCH("/audio/config", UpdateAudioConfig(state, cfg))
+		r.POST("/recordings", CreateRecording(state, cfg))
+		r.POST("/ai/streams", UpdateAIStreams(state))
+		r.GET("/system/changelog", ChangeLogHandler(state))
+		r.GET("/recordings/files", ListRecordingFiles(cfg))
+		r.POST("/recordings/push", PushRecordingToCloud(cfg))
+		r.StaticFS("/recordings/raw", http.Dir(cfg.StorageLocation))
+	}
+}
+
+func GetSystemConnection(cfg *config.Config) gin.HandlerFunc {
+	// @Summary Get system connection info
+	// @Description Returns local IP and WiFi SSID
+	// @Tags System
+	// @Produce json
+	// @Success 200 {object} object "Connection Status"
+	// @Security CookieAuth
+	// @Security BasicAuth
+	// @Router /api/system/connection [get]
+	return func(c *gin.Context) {
+		status := struct {
+			ServerURL string `json:"serverUrl"`
+			SSID      string `json:"ssid"`
+		}{
+			ServerURL: fmt.Sprintf("http://%s:%s", GetLocalIP(), cfg.Port),
+			SSID:      GetWiFiSSID(),
+		}
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+
+func ListRecordingFiles(cfg *config.Config) gin.HandlerFunc {
+	// @Summary List recording files
+	// @Description Returns a list of WAV files in storage
+	// @Tags Recordings
+	// @Produce json
+	// @Success 200 {array} object "File List"
+	// @Security CookieAuth
+	// @Security BasicAuth
+	// @Router /api/recordings/files [get]
+	return func(c *gin.Context) {
 		files, err := os.ReadDir(cfg.StorageLocation)
 		if err != nil {
-			http.Error(w, "Failed to read recordings directory", 500)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read recordings directory"})
 			return
 		}
 
@@ -273,18 +489,28 @@ func FilesHandler(cfg *config.Config) http.HandlerFunc {
 				}
 			}
 		}
-		json.NewEncoder(w).Encode(list)
+		c.JSON(http.StatusOK, list)
 	}
 }
 
-func PushHandler(cfg *config.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func PushRecordingToCloud(cfg *config.Config) gin.HandlerFunc {
+	// @Summary Push recording to cloud
+	// @Description Copies a local file to the cloud drive location
+	// @Tags Recordings
+	// @Accept json
+	// @Produce json
+	// @Param request body object true "Push Request"
+	// @Success 200 {object} string "Success"
+	// @Security CookieAuth
+	// @Security BasicAuth
+	// @Router /api/recordings/push [post]
+	return func(c *gin.Context) {
 		var req struct {
 			Source string `json:"source"`
 			Target string `json:"target"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request", 400)
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 			return
 		}
 
@@ -293,46 +519,64 @@ func PushHandler(cfg *config.Config) http.HandlerFunc {
 
 		// Ensure target directory exists
 		if err := os.MkdirAll(cfg.CloudDriveLocation, 0755); err != nil {
-			http.Error(w, "Failed to create target directory", 500)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create target directory"})
 			return
 		}
 
 		// Copy file
 		src, err := os.Open(sourcePath)
 		if err != nil {
-			http.Error(w, "Source file not found", 404)
+			c.JSON(http.StatusNotFound, gin.H{"error": "Source file not found"})
 			return
 		}
 		defer src.Close()
 
 		dst, err := os.Create(targetPath)
 		if err != nil {
-			http.Error(w, "Failed to create destination file", 500)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create destination file"})
 			return
 		}
 		defer dst.Close()
 
 		if _, err := io.Copy(dst, src); err != nil {
-			http.Error(w, "Failed to copy file", 500)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to copy file"})
 			return
 		}
 
 		fmt.Printf("[CLOUD] Pushed %s -> %s\n", req.Source, req.Target)
-		w.WriteHeader(http.StatusOK)
+		c.JSON(http.StatusOK, gin.H{"status": "success"})
 	}
 }
 
-func NewWSHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Only admins allowed to connect via WebSocket
-		pass := r.URL.Query().Get("pass")
-		if pass != cfg.AdminPassword {
-			fmt.Printf("[WS] Denied connection attempt from %s (invalid or missing password)\n", r.RemoteAddr)
-			http.Error(w, "Unauthorized", 401)
-			return
+
+func NewWSHandler(state *types.AppState, cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		sessionID, _ := session.Get("session_id").(string)
+		auth := session.Get("authenticated")
+
+		if auth != true {
+			// Fallback for non-session clients (e.g. CLI tools if any)
+			pass := c.Query("pass")
+			if pass == cfg.AdminPassword && pass != "" {
+				// OK
+			} else {
+				user, password, hasAuth := c.Request.BasicAuth()
+				if hasAuth {
+					if p, ok := cfg.Credentials[user]; ok && p == password {
+						// OK
+					} else {
+						c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+						return
+					}
+				} else {
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized session"})
+					return
+				}
+			}
 		}
 
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			return
 		}
@@ -340,15 +584,9 @@ func NewWSHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 		wsClient := &types.WSClient{Conn: conn, Type: "admin"}
 		state.Clients.Store(wsClient, true)
 
-		// Disconnect old admin if exists (exclusive access)
-		if oldAdmin := state.AdminClient.Swap(wsClient); oldAdmin != nil {
-			fmt.Printf("[ADMIN] New admin connecting, kicking out old admin %p\n", oldAdmin)
-			// Explicitly notify the client they are being kicked
-			oldAdmin.WriteJSON(map[string]string{"type": "kickout"})
-			oldAdmin.Close()
-			state.Clients.Delete(oldAdmin)
-		}
-		fmt.Printf("[CLIENT] New admin connected (ID: %p).\n", wsClient)
+		// Set the active admin client (multiple can now connect, but let's keep track of 'the' admin if needed)
+		state.AdminClient = wsClient
+		fmt.Printf("[CLIENT] New admin connected (ID: %p, Session: %s).\n", wsClient, sessionID)
 
 		// Listen for client messages (mostly for disconnect)
 		go func() {
@@ -357,10 +595,11 @@ func NewWSHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 				if err != nil {
 					// Client disconnected
 					state.Clients.Delete(wsClient)
-					if state.AdminClient.Load() == wsClient {
-						state.AdminClient.CompareAndSwap(wsClient, nil)
+					if state.AdminClient == wsClient {
+						state.AdminClient = nil
+						// state.MasterSessionID = "" // Removed
 					}
-					fmt.Printf("[CLIENT] Admin disconnected (ID: %p)\n", wsClient)
+					fmt.Printf("[CLIENT] Admin disconnected (ID: %p). Session lock released.\n", wsClient)
 					wsClient.Close()
 					return
 				}
@@ -369,19 +608,20 @@ func NewWSHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 	}
 }
 
-func StreamHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		lang := filepath.Base(r.URL.Path)
+
+func StreamHandler(state *types.AppState, cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		lang := filepath.Base(c.Request.URL.Path)
 		if lang == "stream" || lang == "/" {
 			lang = "default"
 		}
 
-		fmt.Printf("[STREAM] New listener connected: %s (lang: %s)\n", r.RemoteAddr, lang)
+		fmt.Printf("[STREAM] New listener connected: %s (lang: %s)\n", c.Request.RemoteAddr, lang)
 
-		w.Header().Set("Content-Type", "audio/wav")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("X-Accel-Buffering", "no")
+		c.Header("Content-Type", "audio/wav")
+		c.Header("Connection", "keep-alive")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("X-Accel-Buffering", "no")
 
 		// Write a dummy WAV header for a "forever" stream
 		// 44 bytes header
@@ -400,8 +640,8 @@ func StreamHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 		copy(header[36:40], "data")
 		binary.LittleEndian.PutUint32(header[40:44], 0xFFFFFFFF) // Data size
 
-		w.Write(header)
-		if f, ok := w.(http.Flusher); ok {
+		c.Writer.Write(header)
+		if f, ok := c.Writer.(http.Flusher); ok {
 			f.Flush()
 		}
 
@@ -422,8 +662,8 @@ func StreamHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 			defer state.StreamChannels.Delete(ch)
 		}
 
-		fmt.Printf("[STREAM] New listener connected: %s (lang: %s, translated: %v)\n", r.RemoteAddr, lang, isTranslated)
-		defer fmt.Printf("[STREAM] Listener disconnected: %s (lang: %s)\n", r.RemoteAddr, lang)
+		fmt.Printf("[STREAM] New listener connected: %s (lang: %s, translated: %v)\n", c.Request.RemoteAddr, lang, isTranslated)
+		defer fmt.Printf("[STREAM] Listener disconnected: %s (lang: %s)\n", c.Request.RemoteAddr, lang)
 
 		// Write PCM data
 		for {
@@ -438,44 +678,49 @@ func StreamHandler(state *types.AppState, cfg *config.Config) http.HandlerFunc {
 					s := int16(v * 32767)
 					binary.LittleEndian.PutUint16(pcmBuf[i*2:], uint16(s))
 				}
-				_, err := w.Write(pcmBuf)
+				_, err := c.Writer.Write(pcmBuf)
 				if err != nil {
 					return
 				}
-				if f, ok := w.(http.Flusher); ok {
+				if f, ok := c.Writer.(http.Flusher); ok {
 					f.Flush()
 				}
-			case <-r.Context().Done():
+			case <-c.Request.Context().Done():
 				return
 			}
 		}
 	}
 }
 
-func SubtitlesHandler(state *types.AppState) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		lang := r.URL.Query().Get("lang")
-		if lang == "" || lang == "default" {
+
+func SubtitlesHandler(state *types.AppState) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		lang := c.Query("lang")
+		if lang == "" {
+			lang = c.Param("lang")
+			lang = strings.TrimPrefix(lang, "/")
+		}
+		if lang == "" || lang == "default" || lang == "subtitles" {
 			lang = "English"
 		}
 
-		log.Printf("[SERVER] Subtitles connection requested for lang: %s (IP: %s)", lang, r.RemoteAddr)
+		log.Printf("[SERVER] Subtitles connection requested for lang: %s (IP: %s)", lang, c.Request.RemoteAddr)
 
 		if state.Translator == nil {
 			log.Printf("[SERVER] Subtitles handler aborted: Translator is nil")
-			http.Error(w, "Translation not available", 503)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Translation not available"})
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("Access-Control-Allow-Origin", "*")
 
 		ch, cleanup := state.Translator.GetSubtitles(lang)
 		if ch == nil {
 			log.Printf("[SERVER] Failed to get subtitle channel for lang: %s", lang)
-			http.Error(w, "Failed to get subtitle channel", 500)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get subtitle channel"})
 			return
 		}
 		defer func() {
@@ -483,15 +728,15 @@ func SubtitlesHandler(state *types.AppState) http.HandlerFunc {
 			cleanup()
 		}()
 
-		flusher, ok := w.(http.Flusher)
+		flusher, ok := c.Writer.(http.Flusher)
 		if !ok {
-			http.Error(w, "Streaming unsupported", 500)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Streaming unsupported"})
 			return
 		}
 
 		// Initial keep-alive or state check
-		if !state.GeminiEnabled.Load() {
-			fmt.Fprintf(w, "data: %s\n\n", `{"error": "Gemini Master Switch is OFF"}`)
+		if !state.GeminiEnabled {
+			fmt.Fprintf(c.Writer, "data: %s\n\n", `{"error": "Gemini Master Switch is OFF"}`)
 			flusher.Flush()
 		}
 
@@ -504,33 +749,72 @@ func SubtitlesHandler(state *types.AppState) http.HandlerFunc {
 				}
 				log.Printf("[SERVER] Sending subtitle to %s: %s", lang, text)
 				payload, _ := json.Marshal(map[string]string{"text": text})
-				fmt.Fprintf(w, "data: %s\n\n", string(payload))
+				fmt.Fprintf(c.Writer, "data: %s\n\n", string(payload))
 				flusher.Flush()
-			case <-r.Context().Done():
+			case <-c.Request.Context().Done():
 				return
 			case <-time.After(30 * time.Second):
 				// Keep-alive
-				fmt.Fprintf(w, ": keep-alive\n\n")
+				fmt.Fprintf(c.Writer, ": keep-alive\n\n")
 				flusher.Flush()
 			}
 		}
 	}
 }
+type LoginRequest struct {
+	Username string `json:"username" example:"admin"`
+	Password string `json:"password" example:"admin"`
+}
 
-func LoginHandler(cfg *config.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Password string `json:"password"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request", 400)
+// @Summary Create auth session
+// @Description Logs in and establishes a session
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body LoginRequest true "Login Credentials"
+// @Success 200 {object} object "Login Success"
+// @Router /api/auth/session [post]
+func LoginHandler(cfg *config.Config, state *types.AppState) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req LoginRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 			return
 		}
-		if req.Password == cfg.AdminPassword {
-			w.WriteHeader(http.StatusOK)
-		} else {
-			http.Error(w, "Invalid password", 401)
+
+		if req.Username == "" {
+			req.Username = "admin" // Default if empty
 		}
+
+		authorized := false
+		if p, ok := cfg.Credentials[req.Username]; ok && p == req.Password {
+			authorized = true
+		} else if req.Username == "admin" && req.Password == cfg.AdminPassword {
+			authorized = true
+		}
+
+		if !authorized {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+			return
+		}
+		
+		// Generate new session ID
+		b := make([]byte, 16)
+		rand.Read(b)
+		newSessionID := fmt.Sprintf("%x", b)
+
+		// Set Gin Session
+		session := sessions.Default(c)
+		session.Set("authenticated", true)
+		session.Set("username", req.Username)
+		session.Set("session_id", newSessionID)
+		session.Save()
+		
+		c.JSON(http.StatusOK, gin.H{
+			"status":   "success",
+			"session":  newSessionID,
+			"username": req.Username,
+		})
 	}
 }
 

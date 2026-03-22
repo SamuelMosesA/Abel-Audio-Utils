@@ -1,6 +1,7 @@
-import { audioState, type MeterState } from "./audioState.svelte";
+import { type MeterState, SystemStore } from "./audioState.svelte";
 
-class AudioVisuals {
+export class AudioVisuals {
+
     currentMeters = $state<MeterState>({ L: 0, R: 0 });
     monitoring = $state(false);
     // Smoothed numeric dB values for display (dBFS, negative numbers where 0 = full scale)
@@ -13,8 +14,8 @@ class AudioVisuals {
     #LATENCY_BUFFER = 0.1;
     #DECAY = 0.25;
 
-    constructor() {
-        audioState.onMessage = (dv) => this.processData(dv);
+    constructor(system: SystemStore) {
+        system.onMessage = (dv) => this.processData(dv);
         this.runVisualLoop();
     }
 
@@ -122,5 +123,3 @@ class AudioVisuals {
         requestAnimationFrame(tick);
     }
 }
-
-export const audioVisuals = new AudioVisuals();

@@ -1,30 +1,36 @@
 package types
 
 import (
-	"math"
 	"os"
 	"sync"
-	"sync/atomic"
 
 	pa "github.com/gordonklaus/portaudio"
 	"github.com/gorilla/websocket"
 )
 
+type StateChange struct {
+	SessionID string      `json:"sessionId"`
+	Section   string      `json:"section"`
+	Details   interface{} `json:"details,omitempty"`
+}
+
 type AppState struct {
-	Mu          sync.RWMutex
-	IsRecording atomic.Bool
-	IsRunning   atomic.Bool // Engine status
-	DeviceID    atomic.Int32
-	ChLeft      atomic.Int32
-	ChRight     atomic.Int32
-	Boost       atomic.Uint64 // Storing float64 bits
-	GeminiEnabled atomic.Bool
+	Mu sync.RWMutex
+
+	IsRecording bool
+	IsRunning   bool // Engine status
+	DeviceID    int32
+	ChLeft      int32
+	ChRight     int32
+	Boost       float64
+	GeminiEnabled bool
 
 	File         *os.File
-	SamplesWrote atomic.Int64
+	SamplesWrote int64
 
 	Clients       sync.Map // map[*WSClient]bool
-	AdminClient   atomic.Pointer[WSClient]
+	AdminClient   *WSClient
+	MasterSessionID string
 	QuitAudio     chan bool
 
 	// Communication channels
@@ -37,11 +43,36 @@ type AppState struct {
 	// Live streaming channels
 	StreamChannels sync.Map // map[chan []float32]bool
 
+	// Change Log (SSE)
+	BroadcastHub sync.Map // map[chan StateChange]bool
+
 	// Audio Devices cache
 	Devices []*pa.DeviceInfo
 
 	// Translation
 	Translator Translator
+}
+
+// UpdateState locks the state, executes the update, and broadcasts the change.
+func (s *AppState) UpdateState(sessionID string, section string, updateFn func()) {
+	s.Mu.Lock()
+	updateFn()
+	s.Mu.Unlock()
+
+	change := StateChange{
+		SessionID: sessionID,
+		Section:   section,
+	}
+
+	s.BroadcastHub.Range(func(key, value interface{}) bool {
+		ch := key.(chan StateChange)
+		select {
+		case ch <- change:
+		default:
+			// Buffer full or client slow, skip or handle as needed
+		}
+		return true
+	})
 }
 
 type SessionInfo struct {
@@ -61,11 +92,11 @@ type Translator interface {
 }
 
 func (s *AppState) GetBoost() float64 {
-	return math.Float64frombits(s.Boost.Load())
+	return s.Boost
 }
 
 func (s *AppState) SetBoost(b float64) {
-	s.Boost.Store(math.Float64bits(b))
+	s.Boost = b
 }
 
 // WSClient wraps a websocket connection with a mutex for thread-safe writes.

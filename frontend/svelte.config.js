@@ -6,7 +6,6 @@ const config = {
 	preprocess: vitePreprocess(),
 
 	kit: {
-		appDir: 'static',
 		adapter: adapter({
 			pages: 'static',
 			assets: 'static',

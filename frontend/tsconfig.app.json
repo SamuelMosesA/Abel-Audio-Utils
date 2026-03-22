@@ -7,7 +7,10 @@
     "module": "ESNext",
     "types": [
       "svelte",
-      "vite/client"
+      "vite/client",
+      "@testing-library/jest-dom/vitest",
+      "@testing-library/svelte",
+      "vitest/globals"
     ],
     "noEmit": true,
     /**

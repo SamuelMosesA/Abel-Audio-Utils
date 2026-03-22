@@ -1,7 +1,6 @@
 <script lang="ts">
-    import { audioState } from "$lib/audioState.svelte";
-    import { audioConfig } from "$lib/audioConfig.svelte";
-    import { audioVisuals } from "$lib/audioVisuals.svelte";
+    import { getAppContext } from "$lib/audioState.svelte";
+    const { audio, system, visuals, ui } = getAppContext();
     import { goto } from "$app/navigation";
     import { Input } from "$lib/components/ui/input/index.js";
     import { Label } from "$lib/components/ui/label/index.js";
@@ -24,50 +23,43 @@
     import { onMount } from "svelte";
 
     let selectedDeviceValue = $state<string | undefined>(undefined);
-    let isSyncing = false;
+    let isDirty = $state(false);
 
-    onMount(() => {
-        audioState.currentView = "admin";
-        if (audioState.selectedDeviceId >= 0) {
-            isSyncing = true;
-            selectedDeviceValue = audioState.selectedDeviceId.toString();
-        }
-        audioState.connectWebSocket();
-    });
+    ui.currentView = "admin";
+    system.connectWebSocket();
 
-    // Sync external state updates into the local dropdown value
     $effect(() => {
-        if (audioState.selectedDeviceId >= 0 && selectedDeviceValue !== audioState.selectedDeviceId.toString()) {
-            isSyncing = true;
-            selectedDeviceValue = audioState.selectedDeviceId.toString();
+        if (audio.selectedDeviceId >= 0) {
+            selectedDeviceValue = audio.selectedDeviceId.toString();
         }
     });
 
-    // Send selection to server ONLY when user manually changes the local dropdown
     $effect(() => {
-        if (!selectedDeviceValue) return;
-        if (isSyncing) {
-            isSyncing = false;
-            return;
-        }
-        const id = Number(selectedDeviceValue);
-        if (id !== audioState.selectedDeviceId) {
-            audioConfig.connectDevice(id);
+        const serverId = audio.selectedDeviceId.toString();
+        if (!isDirty && selectedDeviceValue !== serverId) {
+            selectedDeviceValue = serverId;
         }
     });
+
+    const handleDeviceChange = (val: string) => {
+        selectedDeviceValue = val;
+        isDirty = true;
+    };
 
     const handleLogout = () => {
-        audioState.logout();
+        system.logout();
         goto("/");
     };
 
-    const handleApplySettings = () => {
-        audioConfig.updateConfig();
+    const handleApplySettings = async () => {
+        const id = selectedDeviceValue ? Number(selectedDeviceValue) : null;
+        await audio.commitConfig(id);
+        isDirty = false;
     };
 </script>
 
 <div
-    class="max-w-7xl mx-auto space-y-6 md:space-y-10 py-8 md:py-16 px-4 md:px-6 animate-in fade-in slide-in-from-bottom-6 duration-1000"
+    class="max-w-7xl mx-auto space-y-6 md:space-y-10 py-8 md:py-16 px-4 md:px-6 animate-in fade-in"
 >
     <!-- Dashboard Header -->
     <header
@@ -89,16 +81,16 @@
                 </h1>
                 <div class="flex items-center justify-center md:justify-start gap-3">
                     <div
-                        class="flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-black tracking-widest uppercase transition-all duration-500 {audioState.wsConnected
+                        class="flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-black tracking-widest uppercase {system.wsConnected
                             ? 'bg-primary/10 border-primary/20 text-primary'
                             : 'bg-destructive/10 border-destructive/20 text-destructive'}"
                     >
                         <span
-                            class="w-1.5 h-1.5 rounded-full {audioState.wsConnected
-                                ? 'bg-primary animate-pulse'
+                            class="w-1.5 h-1.5 rounded-full {system.wsConnected
+                                ? 'bg-primary'
                                 : 'bg-destructive'}"
                         ></span>
-                        {audioState.wsConnected
+                        {system.wsConnected
                             ? "WebSocket Online"
                             : "WebSocket Offline"}
                     </div>
@@ -129,14 +121,15 @@
     </header>
 
     <div class="space-y-6 md:space-y-10">
-        <!-- Audio Interface -->
+        <!-- Combined Engine Parameters -->
         <SimpleCard class="space-y-6 md:space-y-8 text-white">
             <div class="flex items-center gap-3 text-muted-foreground">
-                <Radio class="w-4 h-4 text-primary" />
+                <Settings class="w-4 h-4 text-primary" />
                 <span class="text-xs font-black uppercase tracking-widest"
-                    >Interface Configuration</span
+                    >Input Audio Config</span
                 >
             </div>
+            
             <div class="space-y-3">
                 <Label
                     for="device"
@@ -145,22 +138,23 @@
                 >
                 <Select.Root
                     type="single"
-                    bind:value={selectedDeviceValue}
-                    disabled={audioState.isRecording}
+                    value={selectedDeviceValue}
+                    onValueChange={handleDeviceChange}
+                    disabled={audio.isRecording}
                 >
                     <Select.Trigger
-                        class="h-14 border-border bg-black text-white hover:border-primary/50 transition-all font-bold"
+                        class="h-12 border-border bg-muted/50 text-white font-bold"
                     >
-                        {audioState.devices.find(
+                        {audio.devices.find(
                             (d) => d.id === Number(selectedDeviceValue),
-                        )?.name ?? "Detecting interface..."}
+                        )?.name ?? "Select interface..."}
                     </Select.Trigger>
                     <Select.Content class="bg-card border-border shadow-2xl">
-                        {#each audioState.devices as device}
+                        {#each audio.devices as device}
                             <Select.Item
                                 value={device.id.toString()}
                                 label="[{device.id}] {device.name}"
-                                class="hover:bg-primary/10 font-bold"
+                                class="font-bold"
                             >
                                 [{device.id}] {device.name}
                             </Select.Item>
@@ -168,16 +162,7 @@
                     </Select.Content>
                 </Select.Root>
             </div>
-        </SimpleCard>
 
-        <!-- Routing -->
-        <SimpleCard class="space-y-6 md:space-y-8 text-white">
-            <div class="flex items-center gap-3 text-muted-foreground">
-                <Settings class="w-4 h-4 text-primary" />
-                <span class="text-xs font-black uppercase tracking-widest"
-                    >Engine Parameters</span
-                >
-            </div>
             <div class="grid grid-cols-2 gap-4 md:gap-6">
                 <div class="space-y-3">
                     <Label
@@ -186,9 +171,9 @@
                     >
                     <SimpleInput
                         type="number"
-                        bind:value={audioState.chL}
+                        bind:value={audio.chL}
                         class="font-mono text-lg"
-                        disabled={audioState.isRecording}
+                        disabled={audio.isRecording}
                     />
                 </div>
                 <div class="space-y-3">
@@ -198,9 +183,9 @@
                     >
                     <SimpleInput
                         type="number"
-                        bind:value={audioState.chR}
+                        bind:value={audio.chR}
                         class="font-mono text-lg"
-                        disabled={audioState.isRecording}
+                        disabled={audio.isRecording}
                     />
                 </div>
             </div>
@@ -213,18 +198,21 @@
                     <SimpleInput
                         type="number"
                         step="0.1"
-                        bind:value={audioState.boost}
+                        bind:value={audio.boost}
                         class="font-mono text-lg flex-1"
-                        disabled={audioState.isRecording}
+                        disabled={audio.isRecording}
                     />
-                    <SimpleButton
-                        onclick={handleApplySettings}
-                        disabled={audioState.isRecording}
-                        class="w-full sm:w-auto px-10"
-                    >
-                        Commit
-                    </SimpleButton>
                 </div>
+            </div>
+
+            <div class="pt-4 flex justify-end">
+                <SimpleButton
+                    onclick={handleApplySettings}
+                    disabled={audio.isRecording}
+                    class="w-full sm:w-auto px-6"
+                >
+                    Commit Configuration
+                </SimpleButton>
             </div>
         </SimpleCard>
 
@@ -238,19 +226,19 @@
     >
         <div class="flex flex-col items-center gap-8 md:gap-12">
             <div
-                class="flex items-center gap-2 md:gap-3 px-4 md:px-6 py-1.5 md:py-2 rounded-full border transition-all duration-500 {audioState.isRecording
+                class="flex items-center gap-2 md:gap-3 px-4 md:px-6 py-1.5 md:py-2 rounded-full border {audio.isRecording
                     ? 'bg-destructive/10 border-destructive/20 text-destructive'
                     : 'bg-primary/5 border-primary/20 text-primary/60'}"
             >
                 <span
-                    class="w-2 md:w-2.5 h-2 md:h-2.5 rounded-full {audioState.isRecording
-                        ? 'bg-destructive animate-pulse'
+                    class="w-2 md:w-2.5 h-2 md:h-2.5 rounded-full {audio.isRecording
+                        ? 'bg-destructive'
                         : 'bg-primary/30'}"
                 ></span>
                 <span
-                    class="text-sm font-black tracking-[0.3em] uppercase"
+                    class="text-xs font-black tracking-widest uppercase"
                 >
-                    {audioState.isRecording ? "Recording" : "Standby"}
+                    {audio.isRecording ? "Recording" : "Standby"}
                 </span>
             </div>
 
@@ -258,12 +246,12 @@
                 <SimpleButton
                     class="h-24 md:h-32 text-xl md:text-2xl font-black rounded-xl md:rounded-2xl group flex flex-col items-center justify-center gap-1 md:gap-2"
                     onclick={() => {
-                        if (!audioState.isRecording)
-                            audioConfig.toggleRecording();
+                        if (!audio.isRecording)
+                            audio.toggleRecording();
                     }}
                 >
                     <Play
-                        class="w-8 h-8 md:w-12 md:h-12 fill-current group-hover:scale-110 transition-transform"
+                        class="w-8 h-8 md:w-12 md:h-12 fill-current"
                     />
                     START
                 </SimpleButton>
@@ -271,12 +259,12 @@
                     variant="destructive"
                     class="h-24 md:h-32 text-xl md:text-2xl font-black rounded-xl md:rounded-2xl group flex flex-col items-center justify-center gap-1 md:gap-2"
                     onclick={() => {
-                        if (audioState.isRecording)
-                            audioConfig.toggleRecording();
+                        if (audio.isRecording)
+                            audio.toggleRecording();
                     }}
                 >
                     <Square
-                        class="w-8 h-8 md:w-12 md:h-12 fill-current group-hover:scale-110 transition-transform"
+                        class="w-8 h-8 md:w-12 md:h-12 fill-current"
                     />
                     STOP
                 </SimpleButton>
@@ -295,14 +283,14 @@
                 >
             </div>
             <div
-                class="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 border border-border/40 rounded-lg md:rounded-xl bg-black"
+                class="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 border border-border/40 rounded-lg md:rounded-xl bg-muted/50"
             >
                 <input
                     type="checkbox"
                     id="monitor"
-                    checked={audioVisuals.monitoring}
-                    onchange={() => audioVisuals.toggleMonitor()}
-                    disabled={!audioState.isRunning}
+                    checked={visuals.monitoring}
+                    onchange={() => visuals.toggleMonitor()}
+                    disabled={!audio.isRunning}
                     class="w-4 h-4 accent-primary rounded cursor-pointer"
                 />
                 <Label

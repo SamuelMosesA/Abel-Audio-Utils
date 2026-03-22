@@ -14,23 +14,47 @@ import (
 )
 
 type TranslationSession struct {
-	Language string
-	AudioIn  chan []byte // PCM 16kHz Mono bytes
+	Language  string
+	AudioIn   chan []byte // PCM 16kHz Mono bytes
 	AudioOut  chan []float32
 	Subtitles bool
 	ctx       context.Context
 	cancel    context.CancelFunc
 }
 
-type TranslationManager struct {
-	client *genai.Client
-	model  string
-	Enabled atomic.Bool
-	
-	sessions sync.Map // map[string]*TranslationSession
-	subscribers sync.Map // map[string][]chan string
-	mu       sync.Mutex
+
+type GeminiClient interface {
+	Connect(ctx context.Context, model string, config *genai.LiveConnectConfig) (GeminiSession, error)
 }
+
+type GeminiSession interface {
+	SendRealtimeInput(input genai.LiveRealtimeInput) error
+	Receive() (*genai.LiveServerMessage, error)
+	Close() error
+}
+
+type RealGeminiClient struct {
+	client *genai.Client
+}
+
+func (c *RealGeminiClient) Connect(ctx context.Context, model string, config *genai.LiveConnectConfig) (GeminiSession, error) {
+	session, err := c.client.Live.Connect(ctx, model, config)
+	if err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+type TranslationManager struct {
+	client  GeminiClient
+	model   string
+	Enabled atomic.Bool
+
+	sessions    sync.Map // map[string]*TranslationSession
+	subscribers sync.Map // map[string][]chan string
+	mu          sync.Mutex
+}
+
 
 func NewTranslationManager(apiKey, model string) (*TranslationManager, error) {
 	if apiKey == "" {
@@ -49,10 +73,12 @@ func NewTranslationManager(apiKey, model string) (*TranslationManager, error) {
 	}
 
 	return &TranslationManager{
-		client: client,
+		client: &RealGeminiClient{client: client},
 		model:  model,
 	}, nil
 }
+
+
 
 func (m *TranslationManager) GetChannel(language string) chan []float32 {
 	return m.GetChannels(language, false)
@@ -189,7 +215,7 @@ func (m *TranslationManager) runSession(s *TranslationSession) {
 	}
 
 	config := &genai.LiveConnectConfig{
-		ResponseModalities: modalities,
+		ResponseModalities:       modalities,
 		InputAudioTranscription:  &genai.AudioTranscriptionConfig{},
 		OutputAudioTranscription: &genai.AudioTranscriptionConfig{},
 		RealtimeInputConfig: &genai.RealtimeInputConfig{
@@ -225,7 +251,9 @@ Rules:
 4. If there is silence or no speech, remain silent.
 5. Pay attention to the pauses and try not to rush the pauses.
 6. Avoid complex and less used words in the language.
-7. For languages which take more time to convey the same meaning, speak faster`, displayLang, displayLang, displayLang))
+7. For languages which take more time to convey the same meaning, speak faster
+8. There might be multiple people speaking. Do not wait for them to finish before audio output. Try to get different voices for each speaker
+9. There will be continuous conversation. DO NOT STOP OUTPUT OF TRANSLATED AUDIO & SUBTITLES WITHOUT WAITING FOR PAUSE`, displayLang, displayLang, displayLang))
 				}(),
 			},
 		},
@@ -234,7 +262,7 @@ Rules:
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	liveSession, err := m.client.Live.Connect(ctx, m.model, config)
+	liveSession, err := m.client.Connect(ctx, m.model, config)
 	if err != nil {
 		log.Printf("[GEMINI] Failed to connect live session for %s: %v", s.Language, err)
 		return
@@ -313,8 +341,12 @@ Loop:
 				var maxVal int16
 				for i := 0; i < len(data); i += 2 {
 					val := int16(data[i]) | int16(data[i+1])<<8
-					if val < 0 { val = -val }
-					if val > maxVal { maxVal = val }
+					if val < 0 {
+						val = -val
+					}
+					if val > maxVal {
+						maxVal = val
+					}
 				}
 				log.Printf("[GEMINI] Session %s sent %d chunks in last 5s (last chunk peak: %d)", s.Language, sendCount, maxVal)
 				sendCount = 0
@@ -398,13 +430,13 @@ func convertInt16ToFloat32(data []byte) []float32 {
 	for i := 0; i < count; i++ {
 		v := int16(data[i*2]) | int16(data[i*2+1])<<8
 		f := float32(v) / 32767.0
-		
+
 		// Upsample 1:2 by repeating samples for 48kHz, and mono->stereo
 		base := i * 4
-		floats[base] = f     // Sample A - Left
-		floats[base+1] = f   // Sample A - Right
-		floats[base+2] = f   // Sample B - Left
-		floats[base+3] = f   // Sample B - Right
+		floats[base] = f   // Sample A - Left
+		floats[base+1] = f // Sample A - Right
+		floats[base+2] = f // Sample B - Left
+		floats[base+3] = f // Sample B - Right
 	}
 	return floats
 }

@@ -46,6 +46,7 @@ declare module '$env/static/private' {
 	export const GIT_ASKPASS: string;
 	export const XDG_SESSION_TYPE: string;
 	export const npm_node_execpath: string;
+	export const BROWSER: string;
 	export const SHLVL: string;
 	export const npm_config_noproxy: string;
 	export const OLDPWD: string;
@@ -85,6 +86,7 @@ declare module '$env/static/private' {
 	export const NVM_DIR: string;
 	export const MAKE_TERMERR: string;
 	export const WAYLAND_DISPLAY: string;
+	export const FORCE_COLOR: string;
 	export const LOGNAME: string;
 	export const __VK_LAYER_NV_optimus: string;
 	export const _: string;
@@ -94,10 +96,12 @@ declare module '$env/static/private' {
 	export const MEMORY_PRESSURE_WATCH: string;
 	export const USER_ZDOTDIR: string;
 	export const XDG_SESSION_CLASS: string;
+	export const PLAYWRIGHT_TEST: string;
 	export const TICKTICK_EMAIL: string;
 	export const USERNAME: string;
 	export const TERM: string;
 	export const npm_config_cache: string;
+	export const DEBUG_COLORS: string;
 	export const GNOME_DESKTOP_SESSION_ID: string;
 	export const FC_FONTATIONS: string;
 	export const npm_config_node_gyp: string;
@@ -250,6 +254,7 @@ declare module '$env/dynamic/private' {
 		GIT_ASKPASS: string;
 		XDG_SESSION_TYPE: string;
 		npm_node_execpath: string;
+		BROWSER: string;
 		SHLVL: string;
 		npm_config_noproxy: string;
 		OLDPWD: string;
@@ -289,6 +294,7 @@ declare module '$env/dynamic/private' {
 		NVM_DIR: string;
 		MAKE_TERMERR: string;
 		WAYLAND_DISPLAY: string;
+		FORCE_COLOR: string;
 		LOGNAME: string;
 		__VK_LAYER_NV_optimus: string;
 		_: string;
@@ -298,10 +304,12 @@ declare module '$env/dynamic/private' {
 		MEMORY_PRESSURE_WATCH: string;
 		USER_ZDOTDIR: string;
 		XDG_SESSION_CLASS: string;
+		PLAYWRIGHT_TEST: string;
 		TICKTICK_EMAIL: string;
 		USERNAME: string;
 		TERM: string;
 		npm_config_cache: string;
+		DEBUG_COLORS: string;
 		GNOME_DESKTOP_SESSION_ID: string;
 		FC_FONTATIONS: string;
 		npm_config_node_gyp: string;

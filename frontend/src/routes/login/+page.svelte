@@ -1,11 +1,12 @@
 <script lang="ts">
     import LoginView from "$lib/components/LoginView.svelte";
-    import { audioState } from "$lib/audioState.svelte";
+    import { getAppContext } from "$lib/audioState.svelte";
     import { goto } from "$app/navigation";
-    import { onMount } from "svelte";
 
-    onMount(() => {
-        if (audioState.isAuthenticated) {
+    const { system } = getAppContext();
+
+    $effect(() => {
+        if (system.isAuthenticated) {
             goto("/admin");
         }
     });

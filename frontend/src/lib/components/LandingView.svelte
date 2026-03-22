@@ -1,18 +1,19 @@
 <script lang="ts">
-    import { goto } from "$app/navigation";
-    import { Headphones, ShieldCheck, ArrowRight, Zap, QrCode } from "lucide-svelte";
-    import SimpleCard from "./ui/SimpleCard.svelte";
-    import { audioState } from "$lib/audioState.svelte";
+    import { getAppContext } from "$lib/audioState.svelte";
+    const { audio, system, ui } = getAppContext();
     import { onMount } from "svelte";
     import QRCode from "qrcode";
+    import { Headphones, ShieldCheck, ArrowRight, Zap, QrCode } from "lucide-svelte";
+    import { goto } from "$app/navigation";
+    import SimpleCard from "./ui/SimpleCard.svelte";
 
+    ui.currentView = "landing";
     let qrContainer: HTMLCanvasElement | null = $state(null);
 
     onMount(async () => {
-        await audioState.syncStatus();
-        if (audioState.serverUrl && qrContainer) {
+        if (system.serverUrl && qrContainer) {
             try {
-                await QRCode.toCanvas(qrContainer, audioState.serverUrl, {
+                await QRCode.toCanvas(qrContainer, system.serverUrl, {
                     width: 160,
                     margin: 2,
                     color: {
@@ -27,9 +28,9 @@
     });
 </script>
 
-<div class="max-w-5xl mx-auto space-y-12 md:space-y-20 py-12 md:py-24 px-4 md:px-6 animate-in fade-in slide-in-from-bottom-6 duration-1000">
+<div class="max-w-5xl mx-auto space-y-12 md:space-y-20 py-12 md:py-24 px-4 md:px-6 animate-in fade-in">
     <div class="space-y-4 md:space-y-6 text-center md:text-left">
-        <div class="flex items-center justify-center md:justify-start gap-2 text-primary font-bold text-xs tracking-[0.3em] uppercase">
+        <div class="flex items-center justify-center md:justify-start gap-2 text-primary font-bold text-xs tracking-widest uppercase">
             <Zap class="w-3.5 h-3.5 md:w-4 md:h-4 fill-current" />
             Audio Engine v2.0
         </div>
@@ -87,31 +88,31 @@
     </div>
 
     <!-- QR Code Section -->
-    {#if audioState.serverUrl}
+    {#if system.serverUrl}
     <div class="flex flex-col items-center justify-center space-y-4 pt-12 border-t border-border/20 opacity-80 hover:opacity-100 transition-opacity">
-        <div class="p-4 bg-white/5 rounded-2xl border border-white/10 shadow-2xl backdrop-blur-xl group relative overflow-hidden">
+        <div class="p-4 bg-muted/30 rounded-2xl border border-border shadow-2xl backdrop-blur-xl group relative overflow-hidden">
             <div class="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
             
-            {#if audioState.ssid && audioState.ssid !== "N/A"}
+            {#if system.ssid && system.ssid !== "N/A"}
             <div class="mb-4 flex flex-col items-center space-y-1 relative z-10 border-b border-white/5 pb-4">
-                <div class="flex items-center gap-2 text-primary font-black text-[10px] tracking-[0.2em] uppercase">
+                <div class="flex items-center gap-2 text-primary font-black text-xs tracking-widest uppercase">
                     <Zap class="w-3 h-3" />
                     WiFi Network
                 </div>
-                <span class="text-sm font-bold text-white tracking-tight">{audioState.ssid}</span>
+                <span class="text-sm font-bold text-white tracking-tight">{system.ssid}</span>
             </div>
             {/if}
 
             <canvas bind:this={qrContainer} class="relative z-10 block"></canvas>
             <div class="mt-4 flex flex-col items-center space-y-1 relative z-10">
-                <div class="flex items-center gap-2 text-primary font-black text-[10px] tracking-[0.2em] uppercase">
+                <div class="flex items-center gap-2 text-primary font-black text-xs tracking-widest uppercase">
                     <QrCode class="w-3 h-3" />
                     Quick Connect
                 </div>
-                <span class="text-xs font-mono text-muted-foreground">{audioState.serverUrl}</span>
+                <span class="text-xs font-mono text-muted-foreground">{system.serverUrl}</span>
             </div>
         </div>
-        <p class="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Scan to join the stream from your mobile device</p>
+        <p class="text-xs text-muted-foreground uppercase tracking-widest font-bold">Scan to join the stream from your mobile device</p>
     </div>
     {/if}
 </div>

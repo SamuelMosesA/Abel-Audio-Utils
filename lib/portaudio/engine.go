@@ -10,11 +10,8 @@ import (
 	pa "github.com/gordonklaus/portaudio"
 )
 
-func StartAudioEngine(streamer AudioStreamer, state *types.AppState, cfg *config.Config, deviceID int, recordChan chan<- []float32, playbackChan chan<- []float32) error {
-	if streamer == nil {
-		streamer = &PADriver{}
-	}
-
+func StartAudioEngine(state *types.AppState, cfg *config.Config, deviceID int, recordChan chan<- []float32, playbackChan chan<- []float32) error {
+	state.Mu.Lock()
 	if q := state.QuitAudio; q != nil {
 		close(q)
 		state.QuitAudio = nil
@@ -22,7 +19,8 @@ func StartAudioEngine(streamer AudioStreamer, state *types.AppState, cfg *config
 	}
 	quit := make(chan bool)
 	state.QuitAudio = quit
-	state.IsRunning = true
+	state.IsRunning.Store(true)
+	state.Mu.Unlock()
 
 	devices := state.Devices
 
@@ -35,7 +33,7 @@ func StartAudioEngine(streamer AudioStreamer, state *types.AppState, cfg *config
 	go func() {
 		log.Printf("[AUDIO] Started: %s", dev.Name)
 		defer log.Println("[AUDIO] Stopped")
-		defer func() { state.IsRunning = false }()
+		defer state.IsRunning.Store(false)
 		defer func() {
 			if state.Translator != nil {
 				state.Translator.CloseAll()
@@ -45,7 +43,7 @@ func StartAudioEngine(streamer AudioStreamer, state *types.AppState, cfg *config
 		in := make([]float32, cfg.BufferSize*dev.MaxInputChannels)
 		log.Printf("[AUDIO] Opening stream: %s (%d channels, %d Hz)", dev.Name, dev.MaxInputChannels, cfg.SampleRate)
 		
-		stream, err := streamer.OpenStream(pa.StreamParameters{
+		stream, err := pa.OpenStream(pa.StreamParameters{
 			Input:      pa.StreamDeviceParameters{Device: dev, Channels: dev.MaxInputChannels, Latency: dev.DefaultLowInputLatency},
 			SampleRate: float64(cfg.SampleRate), FramesPerBuffer: cfg.BufferSize,
 		}, in)
@@ -61,7 +59,7 @@ func StartAudioEngine(streamer AudioStreamer, state *types.AppState, cfg *config
 			
 			if channels > 0 {
 				in = make([]float32, cfg.BufferSize*channels)
-				stream, err = streamer.OpenStream(pa.StreamParameters{
+				stream, err = pa.OpenStream(pa.StreamParameters{
 					Input:      pa.StreamDeviceParameters{Device: dev, Channels: channels, Latency: dev.DefaultLowInputLatency},
 					SampleRate: float64(cfg.SampleRate), FramesPerBuffer: cfg.BufferSize,
 				}, in)
@@ -87,12 +85,9 @@ func StartAudioEngine(streamer AudioStreamer, state *types.AppState, cfg *config
 				continue
 			}
 
-			state.Mu.RLock()
-			chL := int(state.ChLeft)
-			chR := int(state.ChRight)
-			boost := float32(state.Boost)
-			state.Mu.RUnlock()
-
+			chL := int(state.ChLeft.Load())
+			chR := int(state.ChRight.Load())
+			boost := float32(state.GetBoost())
 			if boost == 0 {
 				boost = 1.0
 			}

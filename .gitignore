@@ -5,4 +5,3 @@ behringer-recorder
 config.yaml
 frontend/.svelte-kit/generated/
 frontend/.svelte-kit/output/
-coverage.out

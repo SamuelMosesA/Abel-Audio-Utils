@@ -9,7 +9,6 @@
 		"skipLibCheck": true,
 		"sourceMap": true,
 		"strict": true,
-		"moduleResolution": "Bundler",
-		"types": ["@testing-library/jest-dom/vitest", "vitest/globals"]
+		"moduleResolution": "Bundler"
 	}
 }

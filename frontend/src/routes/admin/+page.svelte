@@ -1,18 +1,26 @@
 <script lang="ts">
     import AudioAdminView from "$lib/components/AudioAdminView.svelte";
-    import { getAppContext } from "$lib/audioState.svelte";
+    import { audioState } from "$lib/audioState.svelte";
     import { goto } from "$app/navigation";
+    import { onMount } from "svelte";
 
-    const { system, ui } = getAppContext();
+    onMount(() => {
+        audioState.currentView = "admin";
+        if (!audioState.isAuthenticated) {
+            goto("/login");
+        } else {
+            audioState.syncStatus();
+        }
+    });
 
     // Reactive check for auth changes (logout)
     $effect(() => {
-        if (!system.isAuthenticated) {
+        if (!audioState.isAuthenticated) {
             goto("/login");
         }
     });
 </script>
 
-{#if system.isAuthenticated}
+{#if audioState.isAuthenticated}
     <AudioAdminView />
 {/if}

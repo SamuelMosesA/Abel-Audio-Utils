@@ -1,12 +1,10 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 
 	"gopkg.in/yaml.v3"
 )
-
 
 type Config struct {
 	Port               string  `yaml:"port"`
@@ -17,14 +15,10 @@ type Config struct {
 	DefaultChL         int     `yaml:"default_ch_l"`
 	DefaultChR         int     `yaml:"default_ch_r"`
 	DefaultBoost       float64 `yaml:"default_boost"`
-	AdminPassword         string  `yaml:"admin_password"`
-	AdminUserCredentials  string  `yaml:"admin_user_credentials"`
+	AdminPassword      string  `yaml:"admin_password"`
 	GeminiAPIKey          string  `yaml:"gemini_api_key"`
 	GeminiModel           string  `yaml:"gemini_model"`
 	GeminiChunkMultiplier int     `yaml:"gemini_chunk_multiplier"`
-
-	// Loaded from credentials file
-	Credentials map[string]string `yaml:"-"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -39,26 +33,6 @@ func LoadConfig(path string) (*Config, error) {
 	err = decoder.Decode(&cfg)
 	if err != nil {
 		return nil, err
-	}
-
-	// Load credentials if configured
-	cfg.Credentials = make(map[string]string)
-	if cfg.AdminUserCredentials != "" {
-		credsData, err := os.ReadFile(cfg.AdminUserCredentials)
-		if err == nil {
-			var credList []struct {
-				Username string `json:"username"`
-				Password string `json:"password"`
-			}
-			if err := json.Unmarshal(credsData, &credList); err == nil {
-				for _, c := range credList {
-					cfg.Credentials[c.Username] = c.Password
-				}
-			} else {
-				// Try map[string]string format as fallback
-				json.Unmarshal(credsData, &cfg.Credentials)
-			}
-		}
 	}
 
 	if cfg.GeminiAPIKey == "" {

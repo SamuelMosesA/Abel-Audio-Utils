@@ -1,4 +1,4 @@
-.PHONY: build-frontend build-backend build clean run test test-backend test-frontend
+.PHONY: build-frontend build-backend build clean run
 
 BINARY_NAME=behringer-recorder
 FRONTEND_DIR=frontend
@@ -14,27 +14,12 @@ build-frontend:
 	cp -r $(FRONTEND_DIR)/static/* $(STATIC_DIR)/
 
 build-backend:
-	@echo "Generating Swagger docs..."
-	go run github.com/swaggo/swag/cmd/swag@latest init
 	@echo "Building backend..."
 	go build -o $(BINARY_NAME) main.go
 
 clean:
 	@echo "Cleaning..."
-	rm -rf $(BINARY_NAME) $(STATIC_DIR)/* $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/node_modules coverage.out $(FRONTEND_DIR)/coverage
+	rm -rf $(BINARY_NAME) $(STATIC_DIR)/* $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/node_modules
 
-
-run:
+run: build-backend
 	./$(BINARY_NAME)
-
-test: test-backend test-frontend
-
-test-backend:
-	@echo "Running backend tests..."
-	go test ./...
-
-test-frontend:
-	@echo "Running frontend unit tests..."
-	cd $(FRONTEND_DIR) && npm run test:unit
-	@echo "Running frontend E2E tests..."
-	cd $(FRONTEND_DIR) && npx playwright test --project=chromium

@@ -1,5 +1,3 @@
-import { getContext, setContext } from "svelte";
-
 export interface Device {
     id: number;
     name: string;
@@ -32,11 +30,11 @@ export interface AppStatus {
     geminiMasterEnabled: boolean;
 }
 
-import { fetchWithSync } from "./utils/api";
-
-export class AudioStore {
+class AudioState {
+    // Runes for reactive state
     isRunning = $state(false);
     isRecording = $state(false);
+    wsConnected = $state(false);
     devices = $state<Device[]>([]);
     selectedDeviceId = $state(0);
     chL = $state(0);
@@ -44,327 +42,151 @@ export class AudioStore {
     boost = $state(0);
     storageLocation = $state("");
     cloudDriveLocation = $state("");
+    translations = $state<TranslationSession[]>([]);
+    serverUrl = $state("");
+    ssid = $state("");
+    geminiMasterEnabled = $state(true);
 
-    async sync() {
-        try {
-            const res = await fetch("/api/audio/config", { credentials: "include" });
-            if (res.ok) {
-                const settings = await res.json();
-                this.isRunning = settings.isRunning;
-                this.isRecording = settings.isRecording;
-                this.chL = settings.chL;
-                this.chR = settings.chR;
-                this.boost = settings.boost;
-                this.selectedDeviceId = settings.deviceID;
-                this.storageLocation = settings.storageLocation;
-                this.cloudDriveLocation = settings.cloudDriveLocation;
-            }
-        } catch (e) {
-            console.error("Error syncing audio settings", e);
-        }
+    // Auth and Routing state
+    isAuthenticated = $state(false);
+    wasKicked = $state(false);
+    currentView = $state<"landing" | "stream" | "admin">("landing");
+    
+    #ws: WebSocket | null = null;
+    onMessage: ((dv: DataView) => void) | null = null;
+
+    constructor() {
+        this.isAuthenticated = !!localStorage.getItem("admin_password");
+        this.fetchDevices();
     }
 
     async fetchDevices() {
         try {
-            const res = await fetch("/api/audio/devices", { credentials: "include" });
+            const res = await fetch("/api/devices");
             this.devices = await res.json();
         } catch (e) {
             console.error("Error loading devices", e);
         }
     }
 
-    async commitConfig(id: number | null) {
-        const payload: any = {
-            chL: this.chL,
-            chR: this.chR,
-            boost: this.boost
-        };
-        if (id !== null) payload.deviceID = id;
-
-        await fetchWithSync("/api/audio/config", {
-            method: "PATCH",
-            body: JSON.stringify(payload)
-        });
-        await this.sync();
-    }
-
-    async toggleRecording() {
-        const action = this.isRecording ? "stop" : "start";
-        await fetchWithSync("/api/recordings", {
-            method: "POST",
-            body: JSON.stringify({ action })
-        });
-        await this.sync();
-    }
-}
-
-export class AIStore {
-    geminiMasterEnabled = $state(true);
-    translations = $state<TranslationSession[]>([]);
-
-    constructor(private ui: UIStore) {}
-
-    async sync() {
+    async syncStatus() {
         try {
-            const res = await fetch("/api/ai/streams", { credentials: "include" });
-            if (res.ok) {
-                const gemini = await res.json();
-                this.geminiMasterEnabled = gemini.masterEnabled;
-                this.translations = gemini.sessions || [];
+            const res = await fetch("/api/status");
+            if (res.status === 401) {
+                this.logout();
+                return;
             }
+            const status: AppStatus = await res.json();
+            this.isRunning = status.isRunning;
+            this.isRecording = status.isRecording;
+            this.chL = status.chL;
+            this.chR = status.chR;
+            this.boost = status.boost;
+            this.selectedDeviceId = status.deviceId;
+            this.storageLocation = status.storageLocation;
+            this.cloudDriveLocation = status.cloudDriveLocation;
+            this.translations = status.translations || [];
+            this.serverUrl = status.serverUrl;
+            this.ssid = status.ssid;
+            this.geminiMasterEnabled = status.geminiMasterEnabled;
         } catch (e) {
-            console.error("Error syncing Gemini status", e);
+            console.error("Error syncing status", e);
         }
-    }
-
-    async stopTranslation(language: string) {
-        const res = await fetchWithSync("/api/ai/streams", {
-            method: "POST",
-            body: JSON.stringify({ action: "stop_translation", language, subtitles: true })
-        });
-        
-        if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            this.ui.showNotification(data.error || "Failed to stop translation", "error");
-        }
-        await this.sync();
-    }
-
-    async setGeminiMaster(enabled: boolean) {
-        const res = await fetchWithSync("/api/ai/streams", {
-            method: "POST",
-            body: JSON.stringify({ action: "toggle_master", enabled: enabled })
-        });
-        
-        if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            this.ui.showNotification(data.error || "Failed to toggle Gemini", "error");
-        }
-        await this.sync();
-    }
-}
-
-export class SystemStore {
-    wsConnected = $state(false);
-    serverUrl = $state("");
-    ssid = $state("");
-    isAuthenticated = $state(false);
-    sessionId = $state("");
-
-    #ws: WebSocket | null = null;
-    #sse: EventSource | null = null;
-    onMessage: ((dv: DataView) => void) | null = null;
-
-    constructor(private ui: UIStore, private audio: AudioStore, private ai: AIStore) {
-        if (typeof window !== 'undefined') {
-            this.sessionId = localStorage.getItem("session_id") || "";
-            this.isAuthenticated = !!this.sessionId;
-            
-            if (this.isAuthenticated && window.location.protocol.startsWith('http')) {
-                this.setupSSE();
-                this.syncConnection();
-            }
-        }
-    }
-
-    async syncConnection() {
-        try {
-            const res = await fetch("/api/system/connection", { credentials: "include" });
-            if (res.ok) {
-                const conn = await res.json();
-                this.serverUrl = conn.serverUrl;
-                this.ssid = conn.ssid;
-            }
-        } catch (e) {
-            console.error("Error syncing connection", e);
-        }
-    }
-
-    setupSSE() {
-        if (this.#sse) this.#sse.close();
-        this.#sse = new EventSource("/api/system/changelog", { withCredentials: true });
-        
-        this.#sse.onmessage = (event) => {
-            try {
-                const change = JSON.parse(event.data);
-                if (change.sessionId !== this.sessionId) {
-                    this.handleRemoteUpdate(change);
-                }
-            } catch (e) {
-                console.error("[SSE] Error parsing change:", e);
-            }
-        };
-
-        this.#sse.onerror = () => {
-            setTimeout(() => this.setupSSE(), 5000);
-        };
-    }
-
-    private handleRemoteUpdate(change: { section: string, sessionId: string }) {
-        if (change.section === "gemini") this.ai.sync();
-        else if (change.section === "interface" || change.section === "recording") this.audio.sync();
-        else this.audio.sync();
-        
-        this.ui.showNotification(`Session ${change.sessionId.slice(0, 4)} updated ${change.section}`, change.section);
     }
 
     connectWebSocket() {
-        if (this.#ws && (this.#ws.readyState === WebSocket.OPEN || this.#ws.readyState === WebSocket.CONNECTING)) return;
+        console.log("Attempting WebSocket connection...");
+        if (this.#ws && (this.#ws.readyState === WebSocket.OPEN || this.#ws.readyState === WebSocket.CONNECTING)) {
+            console.log("WebSocket already open or connecting, skipping.");
+            return;
+        }
         
-        this.ui.wasKicked = false;
+        this.wasKicked = false;
+
         const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
         let url = `${protocol}${window.location.host}/ws`;
         
         const pass = localStorage.getItem("admin_password");
-        if (!pass) return;
-        
-        url += `?pass=${pass}&session=${this.sessionId}`;
+        if (pass) {
+            url += `?pass=${pass}`;
+        } else {
+            console.warn("WebSocket attempted aborted: no admin password in storage");
+            return;
+        }
+
+        console.log("Opening new WebSocket to:", url.split('?')[0]); // Hide pass in log
         this.#ws = new WebSocket(url);
         this.#ws.binaryType = "arraybuffer";
 
-        this.#ws.onopen = () => this.wsConnected = true;
+        this.#ws.onopen = () => {
+            console.log(`WebSocket connected successfully`);
+            this.wsConnected = true;
+        };
+
         this.#ws.onmessage = (event: MessageEvent) => {
-            if (event.data instanceof ArrayBuffer && this.onMessage) {
-                this.onMessage(new DataView(event.data));
+            if (event.data instanceof ArrayBuffer) {
+                if (this.onMessage) {
+                    const dv = new DataView(event.data);
+                    this.onMessage(dv);
+                }
+            } else {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === "kickout") {
+                        console.warn("Kicked out by another admin session signal received!");
+                        this.wasKicked = true;
+                        this.logout();
+                    }
+                } catch (e) {
+                    // Ignore
+                }
             }
         };
 
-        this.#ws.onclose = () => {
+        this.#ws.onclose = (event) => {
+            console.log(`WebSocket closed (Code: ${event.code}, Reason: ${event.reason})`);
             this.wsConnected = false;
-            if (this.ui.currentView === "admin" && this.isAuthenticated && !this.ui.wasKicked) {
+            // Only retry if we're still in admin view and NOT kicked
+            if (this.currentView === "admin" && this.isAuthenticated && !this.wasKicked) {
+                console.log("Auto-reconnecting in 2s...");
                 setTimeout(() => this.connectWebSocket(), 2000);
+            } else {
+                console.log("Not reconnecting: view=" + this.currentView + ", auth=" + this.isAuthenticated + ", kicked=" + this.wasKicked);
             }
+        };
+
+        this.#ws.onerror = (e) => {
+            console.error("WebSocket error:", e);
+            this.wsConnected = false;
         };
     }
 
-    async login(username: string, pass: string) {
+    async login(password: string) {
         try {
-            const res = await fetch("/api/auth/session", {
+            const res = await fetch("/api/login", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password: pass }),
-                credentials: "include"
+                body: JSON.stringify({ password })
             });
-
             if (res.ok) {
-                const data = await res.json();
-                localStorage.setItem("admin_user", username);
-                localStorage.setItem("admin_password", pass);
-                if (data.session) {
-                    this.sessionId = data.session;
-                    localStorage.setItem("session_id", data.session);
-                }
+                localStorage.setItem("admin_password", password);
                 this.isAuthenticated = true;
-                this.setupSSE();
-                this.syncConnection();
                 return true;
             }
             return false;
         } catch (e) {
-            console.error("Login error:", e);
+            console.error("Login error", e);
             return false;
         }
     }
 
     logout() {
-        localStorage.removeItem("admin_user");
         localStorage.removeItem("admin_password");
-        localStorage.removeItem("session_id");
         this.isAuthenticated = false;
-        this.sessionId = "";
-        this.ui.currentView = "landing";
-        if (this.#ws) { this.#ws.close(); this.#ws = null; }
-        if (this.#sse) { this.#sse.close(); this.#sse = null; }
-    }
-}
-
-export class UIStore {
-    currentView = $state<"landing" | "stream" | "admin">("landing");
-    notification = $state<{ message: string, section: string } | null>(null);
-    wasKicked = $state(false);
-    #notificationTimeout: any = null;
-
-    showNotification(message: string, section: string) {
-        if (this.#notificationTimeout) clearTimeout(this.#notificationTimeout);
-        this.notification = { message, section };
-        this.#notificationTimeout = setTimeout(() => {
-            this.notification = null;
-        }, 5000);
-    }
-}
-
-import { AudioVisuals } from "./audioVisuals.svelte";
-
-export interface RecordedFile {
-    name: string;
-    size: number;
-    modTime: string;
-}
-
-export class FileStore {
-    recordedFiles = $state<RecordedFile[]>([]);
-
-    constructor() {
-        if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
-            this.fetchFiles();
-            setInterval(() => this.fetchFiles(), 10000);
-        }
-    }
-
-    async fetchFiles() {
-        try {
-            const res = await fetch("/api/recordings/files", { credentials: "include" });
-            if (res.ok) {
-                const files = await res.json();
-                files.sort((a: RecordedFile, b: RecordedFile) => new Date(b.modTime).getTime() - new Date(a.modTime).getTime());
-                this.recordedFiles = files;
-            }
-        } catch (e) {
-            console.error("Error fetching files", e);
-        }
-    }
-
-    async pushToCloud(source: string, target: string) {
-        try {
-            const res = await fetch("/api/recordings/push", {
-                method: "POST",
-                body: JSON.stringify({ source, target }),
-                credentials: "include"
-            });
-            if (res.ok) return { success: true };
-            return { success: false, error: await res.text() };
-        } catch (e) {
-            return { success: false, error: String(e) };
+        if (this.#ws) {
+            this.#ws.close();
+            this.#ws = null;
         }
     }
 }
 
-export class AppState {
-    ui = new UIStore();
-    ai = new AIStore(this.ui);
-    audio = new AudioStore();
-    files = new FileStore();
-    system: SystemStore;
-    visuals: AudioVisuals;
-
-    constructor() {
-        this.system = new SystemStore(this.ui, this.audio, this.ai);
-        this.visuals = new AudioVisuals(this.system);
-        
-        if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
-            this.audio.fetchDevices();
-            this.audio.sync();
-            this.ai.sync();
-        }
-    }
-}
-
-const APP_STATE_KEY = Symbol("APP_STATE");
-
-export function setAppContext(state: AppState) {
-    return setContext(APP_STATE_KEY, state);
-}
-
-export function getAppContext() {
-    return getContext<AppState>(APP_STATE_KEY);
-}
+export const audioState = new AudioState();

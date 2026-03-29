@@ -3,9 +3,8 @@
     import SimpleCard from "./ui/SimpleCard.svelte";
     import SimpleButton from "./ui/SimpleButton.svelte";
     import SimpleInput from "./ui/SimpleInput.svelte";
-    import { getAppContext, type RecordedFile } from "../audioState.svelte";
-
-    const { files, audio } = getAppContext();
+    import { fileState, type RecordedFile } from "../fileState.svelte";
+    import { audioState } from "../audioState.svelte";
 
     let pushingFile = $state<RecordedFile | null>(null);
     let targetFilename = $state("");
@@ -18,7 +17,7 @@
 
     const handlePush = async () => {
         if (!pushingFile || !targetFilename) return;
-        const res = await files.pushToCloud(pushingFile.name, targetFilename);
+        const res = await fileState.pushToCloud(pushingFile.name, targetFilename);
         if (res.success) {
             pushingFile = null;
         } else {
@@ -44,30 +43,30 @@
 
     <!-- System Paths -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 pb-6 md:pb-10 border-b border-border/40">
-        <SimpleCard class="p-4 md:p-5 bg-card/50 space-y-1.5 md:space-y-2 group min-w-0 border-dashed">
+        <SimpleCard class="p-4 md:p-5 bg-card/50 space-y-1.5 md:space-y-2 group hover:border-primary/20 transition-colors min-w-0 border-dashed">
             <span class="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground group-hover:text-primary transition-colors">Storage Cluster</span>
-            <div class="flex items-center gap-2 md:gap-3 text-xs font-mono text-white opacity-80" title={audio.storageLocation}>
+            <div class="flex items-center gap-2 md:gap-3 text-xs font-mono text-white opacity-80" title={audioState.storageLocation}>
                 <div class="w-1 md:w-1.5 h-1 md:h-1.5 rounded-full bg-primary/40 shrink-0"></div>
-                <div class="truncate">{audio.storageLocation}</div>
+                <div class="truncate">{audioState.storageLocation}</div>
             </div>
         </SimpleCard>
-        <SimpleCard class="p-4 md:p-5 bg-card/50 space-y-1.5 md:space-y-2 group min-w-0 border-dashed">
+        <SimpleCard class="p-4 md:p-5 bg-card/50 space-y-1.5 md:space-y-2 group hover:border-primary/20 transition-colors min-w-0 border-dashed">
             <span class="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground group-hover:text-primary transition-colors">Remote Archive</span>
-            <div class="flex items-center gap-2 md:gap-3 text-xs font-mono text-white opacity-80" title={audio.cloudDriveLocation}>
+            <div class="flex items-center gap-2 md:gap-3 text-xs font-mono text-white opacity-80" title={audioState.cloudDriveLocation}>
                 <div class="w-1 md:w-1.5 h-1 md:h-1.5 rounded-full bg-primary/40 shrink-0"></div>
-                <div class="truncate">{audio.cloudDriveLocation}</div>
+                <div class="truncate">{audioState.cloudDriveLocation}</div>
             </div>
         </SimpleCard>
     </div>
 
     <div class="space-y-4">
-        {#if files.recordedFiles.length === 0}
+        {#if fileState.recordedFiles.length === 0}
             <div class="py-24 text-center border-2 border-dashed border-border/40 rounded-3xl">
                 <p class="text-muted-foreground font-medium tracking-wide">No system archives found.</p>
             </div>
         {:else}
-            {#each files.recordedFiles as file}
-                <SimpleCard class="flex flex-col xl:flex-row xl:items-center justify-between group hover:bg-muted/10 transition-all gap-6 md:gap-8 min-w-0 p-4 md:p-6">
+            {#each fileState.recordedFiles as file}
+                <SimpleCard class="flex flex-col xl:flex-row xl:items-center justify-between hover:border-primary/40 hover:bg-muted/10 transition-all duration-300 gap-6 md:gap-8 active:scale-[0.995] min-w-0 p-4 md:p-6">
                     <div class="flex items-center gap-4 md:gap-6 min-w-0 flex-1">
                         <div class="p-3 md:p-4 bg-muted/30 rounded-xl md:rounded-2xl group-hover:bg-primary/10 transition-colors shrink-0">
                             <FileAudio class="w-6 h-6 md:w-8 md:h-8 text-muted-foreground group-hover:text-primary transition-colors" />
@@ -85,8 +84,8 @@
                     <div class="flex flex-col sm:flex-row items-center gap-4 md:gap-6 w-full xl:w-auto">
                         <audio 
                             controls 
-                            src="/api/recordings/raw/{file.name}" 
-                            class="h-10 w-full sm:w-72 xl:w-96"
+                            src="/api/recordings/{file.name}" 
+                            class="h-10 w-full sm:w-[300px] xl:w-[400px] brightness-90 contrast-125"
                         ></audio>
                         <SimpleButton 
                             class="w-full sm:w-auto"
@@ -105,7 +104,7 @@
 <!-- Push Dialog Modal -->
 {#if pushingFile}
     <div class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
-        <SimpleCard class="w-full max-w-lg bg-background border-primary/20 p-6 space-y-8">
+        <SimpleCard class="w-full max-w-lg bg-[#0a0a0a] border-primary/20 p-10 space-y-10 animate-in zoom-in-[0.98]">
             <div class="flex items-center justify-between">
                 <div class="space-y-1">
                     <h2 class="text-2xl font-bold text-white flex items-center gap-3">

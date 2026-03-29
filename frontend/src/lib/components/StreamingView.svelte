@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { getAppContext } from "../audioState.svelte";
-    const { ai, ui, audio } = getAppContext();
+    import { audioState } from "../audioState.svelte";
+    import { audioVisuals } from "../audioVisuals.svelte";
     import { goto } from "$app/navigation";
     import * as Card from "$lib/components/ui/card/index.js";
     import { Button } from "$lib/components/ui/button/index.js";
@@ -11,7 +11,7 @@
     let selectedLang = $state("default");
     let showSubtitles = $state(false);
     let subtitleState = $state({ tokenList: [] as {id: string, text: string}[] });
-    let audioSource = $derived(`/api/audio/stream/${selectedLang}`);
+    let audioSource = $derived(`/api/stream/${selectedLang}`);
     
     let eventSource: EventSource | null = null;
     let scrollContainerRef = $state<HTMLElement | null>(null);
@@ -33,10 +33,16 @@
         { id: "hungarian", name: "Hungarian"}
     ];
 
-    ui.currentView = "stream";
-
-    $effect(() => {
+    onMount(() => {
+        audioState.currentView = "stream";
+        audioState.syncStatus();
+        
+        const interval = setInterval(() => {
+            audioState.syncStatus();
+        }, 5000);
+        
         return () => {
+            clearInterval(interval);
             if (eventSource) eventSource.close();
         };
     });
@@ -47,8 +53,8 @@
             eventSource = null;
         }
         
-        if (showSubtitles && ai.geminiMasterEnabled) {
-            eventSource = new EventSource(`/api/ai/subtitles?lang=${selectedLang}`);
+        if (showSubtitles && audioState.geminiMasterEnabled) {
+            eventSource = new EventSource(`/api/subtitles?lang=${selectedLang}`);
             eventSource.onmessage = async (e) => {
                 try {
                     const data = JSON.parse(e.data);
@@ -113,14 +119,14 @@
             Back to Home
         </Button>
         <div class="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 text-xs font-bold">
-            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             LIVE STREAM
         </div>
     </header>
 
-    <Card.Root class="bg-card/40 border-border backdrop-blur-xl shadow-lg overflow-hidden">
+    <Card.Root class="bg-card/40 border-border backdrop-blur-xl shadow-2xl overflow-hidden">
         <Card.Header class="text-center space-y-4">
-            <div class="mx-auto p-4 bg-primary/20 rounded-full w-fit">
+            <div class="mx-auto p-4 bg-primary/20 rounded-full w-fit shadow-[0_0_30px_hsl(var(--primary)/0.2)]">
                 <Volume2 class="w-12 h-12 text-primary" />
             </div>
             <div>
@@ -146,7 +152,7 @@
                         {/each}
                     </select>
                         <div class="flex flex-col gap-2">
-                            <p class="text-[10px] text-primary/80 font-medium">
+                            <p class="text-[10px] text-primary/80 animate-pulse font-medium">
                                 {#if selectedLang !== 'default'}
                                     ✨ Real-time AI translation active
                                 {:else}
@@ -161,8 +167,8 @@
                                 <div class="w-8 h-4 rounded-full border border-border/60 p-0.5 transition-colors {showSubtitles ? 'bg-primary border-primary' : 'bg-muted'} relative">
                                     <div class="absolute top-0.5 bottom-0.5 w-3 rounded-full bg-white transition-all {showSubtitles ? 'right-0.5' : 'left-0.5'} shadow-sm"></div>
                                 </div>
-                                <span class="text-xs font-bold uppercase tracking-widest {showSubtitles ? 'text-primary' : 'text-muted-foreground'}">Subtitles</span>
-                                </button>
+                                <span class="text-[10px] font-bold uppercase tracking-wider {showSubtitles ? 'text-primary' : 'text-muted-foreground'}">Subtitles</span>
+                            </button>
                         </div>
                     </div>
 
@@ -191,23 +197,23 @@
                             <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary/20 via-primary to-primary/20 opacity-40 group-hover:opacity-100 transition-opacity"></div>
                             
                             <div class="flex items-center justify-between mb-4">
-                                <div class="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary/60">
-                                    <span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                                <div class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-primary/60">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
                                     Live Subtitles ({languages.find(l => l.id === selectedLang)?.name || selectedLang})
                                 </div>
-                                <div class="text-xs text-muted-foreground font-medium italic">
+                                <div class="text-[10px] text-muted-foreground font-medium italic">
                                     {subtitleState.tokenList.length} tokens
                                 </div>
                             </div>
                             <div 
-                                class="h-80 custom-scrollbar overflow-y-auto relative" 
+                                class="h-[320px] custom-scrollbar overflow-y-auto relative" 
                                 id="subtitle-container" 
                                 bind:this={scrollContainerRef}
                                 onscroll={handleScroll}
                             >
-                                {#if !ai.geminiMasterEnabled}
+                                {#if !audioState.geminiMasterEnabled}
                                     <div class="h-full flex items-center justify-center">
-                                        <p class="text-sm text-destructive font-medium italic">
+                                        <p class="text-sm text-red-400/80 font-medium italic">
                                             Live translation is currently disabled by administrator.
                                         </p>
                                     </div>
@@ -215,9 +221,9 @@
                                     <div class="h-full flex items-center justify-center">
                                         <div class="flex items-center gap-3">
                                             <div class="flex gap-1">
-                                                <div class="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
-                                                <div class="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
-                                                <div class="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
+                                                <div class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.3s]"></div>
+                                                <div class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.15s]"></div>
+                                                <div class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce"></div>
                                             </div>
                                             <p class="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-widest mt-0.5">
                                                 Listening...
@@ -243,7 +249,7 @@
                                         class="bg-primary/90 hover:bg-primary text-black text-xs font-bold px-4 py-1.5 rounded-full shadow-lg backdrop-blur-md transition-all flex items-center gap-2"
                                         onclick={resumeAutoScroll}
                                     >
-                                        <span class="w-2 h-2 rounded-full bg-black"></span>
+                                        <span class="w-2 h-2 rounded-full bg-black animate-pulse"></span>
                                         Resume scroll
                                     </button>
                                 </div>

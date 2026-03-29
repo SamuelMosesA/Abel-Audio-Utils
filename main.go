@@ -3,24 +3,28 @@ package main
 import (
 	"behringerRecorder/lib/config"
 	"behringerRecorder/lib/gemini"
-	"behringerRecorder/lib/portaudio"
-	"behringerRecorder/lib/types"
+	"behringerRecorder/lib/audioengine"
+	"behringerRecorder/lib/state"
 	"behringerRecorder/lib/web"
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"path/filepath"
 
 	pa "github.com/gordonklaus/portaudio"
 )
 
-func PrintGreen(msg string) {
-	fmt.Printf("\033[32m%s\033[0m\n", msg)
-}
-
+// @title Behringer Audio Recorder API
+// @version 1.0
+// @description REST API for controlling audio interfaces, recording, and Gemini models.
+// @host localhost:8080
+// @BasePath /
+// @securityDefinitions.basic BasicAuth
+// @securityDefinitions.apikey CookieAuth
+// @in cookie
+// @name behringer_session
 func main() {
-	// ... (rest of main initialization)
+	fmt.Println("Starting Behringer Audio Recorder...")
 	cfgPath := flag.String("config", "config.yaml", "path to config YAML file")
 	flag.Parse()
 
@@ -41,71 +45,42 @@ func main() {
 	pa.Initialize()
 	defer pa.Terminate()
 
-	state := &types.AppState{
-		StorageLocation:    cfg.StorageLocation,
-		CloudDriveLocation: cfg.CloudDriveLocation,
-		RecordChan:         make(chan []float32, 100),
-		PlaybackChan:       make(chan []float32, 100),
-	}
-	state.ChLeft.Store(int32(cfg.DefaultChL))
-	state.ChRight.Store(int32(cfg.DefaultChR))
-	state.SetBoost(cfg.DefaultBoost)
-	state.DeviceID.Store(-1) // No device selected initially
+	appState := state.NewAppState(cfg.StorageLocation, cfg.CloudDriveLocation)
+	
+	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+		s.SetChL(int32(cfg.DefaultChL))
+		s.SetChR(int32(cfg.DefaultChR))
+		s.SetBoost(cfg.DefaultBoost)
+		s.SetDeviceID(-1)
+	})
 
 	// Initialize Translation Manager if API key provided
 	if cfg.GeminiAPIKey != "" {
-		tm, err := gemini.NewTranslationManager(cfg.GeminiAPIKey, cfg.GeminiModel)
+		tm, err := gemini.NewTranslationManager(cfg.GeminiAPIKey, cfg.GeminiModel, cfg.GeminiVoice)
 		if err != nil {
 			fmt.Printf("[GEMINI] Warning: Failed to init Translation Manager: %v\n", err)
 		} else {
-			state.Translator = tm
-			state.Translator.SetEnabled(true)
-			state.GeminiEnabled.Store(true)
-			fmt.Printf("[GEMINI] Translation enabled using model: %s\n", cfg.GeminiModel)
+			appState.Translator = tm
+			state.Update[state.GeminiConfig](appState, state.SectionGemini, func(s *state.GeminiConfig) {
+				s.SetEnabled(false)
+			})
+			fmt.Printf("[GEMINI] Translation manager ready (disabled by default) using model: %s\n", cfg.GeminiModel)
 		}
 	}
 
 	allDevices, _ := pa.Devices()
 	for _, d := range allDevices {
 		if d.MaxInputChannels > 0 {
-			state.Devices = append(state.Devices, d)
+			appState.Devices = append(appState.Devices, d)
 		}
 	}
 
 	// Start workers
-	web.StartAudioBroadcaster(state, cfg, state.PlaybackChan)
-	portaudio.StartStorageWorker(state, state.RecordChan)
+	audioengine.StartAudioBroadcaster(appState, cfg, appState.PlaybackChan)
+	audioengine.StartStorageWorker(appState, appState.RecordChan)
 
-	// 1. Static Assets (JS, CSS, etc.)
-	http.Handle("/static/", http.FileServer(http.Dir("static")))
+	r := web.NewRouter(appState, cfg)
 
-	// 2. Main HTML Routes
-	htmlRoutes := map[string]string{
-		"/":       "static/index.html",
-		"/admin":  "static/admin.html",
-		"/login":  "static/login.html",
-		"/stream": "static/stream.html",
-	}
-
-	for path, file := range htmlRoutes {
-		f := file // closure capture
-		http.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-			http.ServeFile(w, r, f)
-		})
-	}
-
-	http.HandleFunc("/api/devices", web.DevicesHandler(state))
-	http.Handle("/api/recordings/", http.StripPrefix("/api/recordings/", http.FileServer(http.Dir(cfg.StorageLocation))))
-	http.HandleFunc("/api/files", web.FilesHandler(cfg))
-	http.HandleFunc("/api/status", web.NewStatusHandler(state, cfg))
-	http.HandleFunc("/api/control", web.NewControlHandler(state, cfg))
-	http.HandleFunc("/api/push", web.PushHandler(cfg))
-	http.HandleFunc("/api/login", web.LoginHandler(cfg))
-	http.HandleFunc("/api/stream", web.StreamHandler(state, cfg))
-	http.HandleFunc("/api/stream/", web.StreamHandler(state, cfg))
-	http.HandleFunc("/api/subtitles", web.SubtitlesHandler(state))
-	http.HandleFunc("/ws", web.NewWSHandler(state, cfg))
-
-	PrintGreen(fmt.Sprintf("UI: http://%s:%s", web.GetLocalIP(), cfg.Port))
-	log.Fatal(http.ListenAndServe("0.0.0.0:"+cfg.Port, nil))
+	fmt.Printf("\033[32mUI: http://%s:%s\033[0m\n", web.GetLocalIP(), cfg.Port)
+	log.Fatal(r.Run("0.0.0.0:" + cfg.Port))
 }

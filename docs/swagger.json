@@ -1,0 +1,400 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "REST API for controlling audio interfaces, recording, and Gemini models.",
+        "title": "Behringer Audio Recorder API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/api/ai/config": {
+            "get": {
+                "description": "Returns the list of configured languages and the original language",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI"
+                ],
+                "summary": "Get AI configuration",
+                "responses": {
+                    "200": {
+                        "description": "AI Configuration",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/ai/streams": {
+            "get": {
+                "description": "Returns active sessions and master state",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI"
+                ],
+                "summary": "Get AI streams status",
+                "responses": {
+                    "200": {
+                        "description": "AI Streams Status",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    },
+                    {
+                        "BasicAuth": []
+                    }
+                ],
+                "description": "Toggles master gemini switch or stops a specific language translation",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "AI"
+                ],
+                "summary": "Control AI streams",
+                "parameters": [
+                    {
+                        "description": "AI Action",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid Action",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/ai/subtitles": {
+            "get": {
+                "description": "Real-time SSE stream of subtitles for a specific language",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "AI"
+                ],
+                "summary": "Get subtitles stream",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Language",
+                        "name": "lang",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE Stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/audio/config": {
+            "get": {
+                "description": "Returns current channels, boost, device info, and recording status",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audio"
+                ],
+                "summary": "Get audio config",
+                "responses": {
+                    "200": {
+                        "description": "Audio Configuration",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    },
+                    {
+                        "BasicAuth": []
+                    }
+                ],
+                "description": "Boots up the device engine or updates running config",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audio"
+                ],
+                "summary": "Update audio config",
+                "parameters": [
+                    {
+                        "description": "Interface Config",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid Request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/session": {
+            "post": {
+                "description": "Logs in and establishes a session",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Create auth session",
+                "parameters": [
+                    {
+                        "description": "Login Credentials",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/web.LoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Login Success",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/recordings": {
+            "get": {
+                "description": "Returns whether the system is recording",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recordings"
+                ],
+                "summary": "Get recording status",
+                "responses": {
+                    "200": {
+                        "description": "Recording Status",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    },
+                    {
+                        "BasicAuth": []
+                    }
+                ],
+                "description": "Starts or stops a recording",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recordings"
+                ],
+                "summary": "Control recording",
+                "parameters": [
+                    {
+                        "description": "Recording Action",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid Action",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/system/changelog": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    },
+                    {
+                        "BasicAuth": []
+                    }
+                ],
+                "description": "Real-time SSE stream of state changes across the console",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "System"
+                ],
+                "summary": "Get system change log",
+                "responses": {
+                    "200": {
+                        "description": "SSE Stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "web.LoginRequest": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "example": "admin"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "admin"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BasicAuth": {
+            "type": "basic"
+        },
+        "CookieAuth": {
+            "type": "apiKey",
+            "name": "behringer_session",
+            "in": "cookie"
+        }
+    }
+}

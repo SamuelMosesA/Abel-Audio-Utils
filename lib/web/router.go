@@ -3,7 +3,9 @@ package web
 import (
 	"behringerRecorder/lib/config"
 	"behringerRecorder/lib/state"
+	"embed"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"time"
 
@@ -15,7 +17,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-func NewRouter(appState *state.AppState, cfg *config.Config) *gin.Engine {
+func NewRouter(appState *state.AppState, cfg *config.Config, staticFiles embed.FS) *gin.Engine {
 	// Switch from default to release mode by default, standard logger in gin is noisy
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -55,25 +57,40 @@ func NewRouter(appState *state.AppState, cfg *config.Config) *gin.Engine {
 	})
 	r.Use(sessions.Sessions("behringer_session", store))
 
-	// Static assets
-	r.StaticFile("/favicon.png", "static/favicon.png")
-	r.Static("/_app", "static/_app")
+	subFS, _ := fs.Sub(staticFiles, "static")
+	content := http.FS(subFS)
+
+	// Custom subFS for _app to ensure paths match (e.g. /_app/immutable should look for immutable in the sub-FS)
+	appFS, _ := fs.Sub(staticFiles, "static/_app")
+	appContent := http.FS(appFS)
+
+	// Static assets using standard Gin helpers where possible
+	r.StaticFileFS("/favicon.png", "favicon.png", content)
+	r.StaticFS("/_app", appContent)
+
+	// Helper for serving HTML files without redirects
+	serveHTML := func(filename string) gin.HandlerFunc {
+		return func(c *gin.Context) {
+			data, err := fs.ReadFile(subFS, filename)
+			if err != nil {
+				c.String(http.StatusNotFound, "File not found")
+				return
+			}
+			c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+		}
+	}
 
 	// Multi-page entry points (Prerendered)
-	r.StaticFile("/", "static/index.html")
-	r.StaticFile("/admin", "static/admin.html")
-	r.StaticFile("/login", "static/login.html")
-	r.StaticFile("/stream", "static/stream.html")
+	r.GET("/", serveHTML("index.html"))
+	r.GET("/admin", serveHTML("admin.html"))
+	r.GET("/login", serveHTML("login.html"))
+	r.GET("/stream", serveHTML("stream.html"))
 
 	// Consolidated AI Live Audio route - serves index.html for any subpath
-	r.GET("/ai_live_audio/*any", func(c *gin.Context) {
-		c.File("static/index.html")
-	})
+	r.GET("/ai_live_audio/*any", serveHTML("index.html"))
 
 	// SPA fallback for dynamic routes
-	r.NoRoute(func(c *gin.Context) {
-		c.File("static/index.html")
-	})
+	r.NoRoute(serveHTML("index.html"))
 
 	r.GET("/swagger", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/swagger/index.html")

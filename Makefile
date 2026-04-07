@@ -11,7 +11,7 @@ build-frontend:
 	cd $(FRONTEND_DIR) && npm install && npm run build
 	mkdir -p $(STATIC_DIR)
 	rm -rf $(STATIC_DIR)/*
-	cp -r $(FRONTEND_DIR)/static/* $(STATIC_DIR)/
+	cp -r $(FRONTEND_DIR)/build/* $(STATIC_DIR)/
 
 build-backend:
 	@echo "Generating Swagger docs..."

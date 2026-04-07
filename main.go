@@ -6,6 +6,7 @@ import (
 	"behringerRecorder/lib/audioengine"
 	"behringerRecorder/lib/state"
 	"behringerRecorder/lib/web"
+	"embed"
 	"flag"
 	"fmt"
 	"log"
@@ -13,6 +14,9 @@ import (
 
 	pa "github.com/gordonklaus/portaudio"
 )
+
+//go:embed all:static
+var staticFiles embed.FS
 
 // @title Behringer Audio Recorder API
 // @version 1.0
@@ -79,7 +83,7 @@ func main() {
 	audioengine.StartAudioBroadcaster(appState, cfg, appState.PlaybackChan)
 	audioengine.StartStorageWorker(appState, appState.RecordChan)
 
-	r := web.NewRouter(appState, cfg)
+	r := web.NewRouter(appState, cfg, staticFiles)
 
 	fmt.Printf("\033[32mUI: http://%s:%s\033[0m\n", web.GetLocalIP(), cfg.Port)
 	log.Fatal(r.Run("0.0.0.0:" + cfg.Port))

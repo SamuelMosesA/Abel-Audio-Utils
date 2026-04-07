@@ -5,7 +5,7 @@
   import Button from "$lib/components/ui/Button.svelte";
   import LanguageSelector from "$lib/components/ai/LanguageSelector.svelte";
   import { goto } from "$app/navigation";
-  import { Globe, ArrowRight, QrCode } from "lucide-svelte";
+  import { Globe, ArrowRight, QrCode, Volume2, Waves } from "lucide-svelte";
   import { onMount } from "svelte";
   import QRCode from "qrcode";
 
@@ -88,14 +88,16 @@
                 onchange={(val: string) => selectedLang = val} 
               />
             </div>
-            <Button 
-              variant="secondary" 
-              disabled={!selectedLang} 
-              onclick={goToAILiveAudio}
-              class="w-full"
-            >
-              Join AI Stream <ArrowRight class="ml-2 w-4 h-4" />
-            </Button>
+            <div class="flex flex-col gap-2">
+              <Button 
+                variant="secondary" 
+                disabled={!selectedLang} 
+                onclick={goToAILiveAudio}
+                class="w-full"
+              >
+                Join AI Stream <ArrowRight class="ml-2 w-4 h-4" />
+              </Button>
+            </div>
           </div>
           
           <div class="p-4 bg-muted/20 rounded-lg border border-border">
@@ -134,6 +136,37 @@
         </div>
       </div>
     </Card>
+
+    <!-- Direct Broadcast Section (Untranslated) -->
+    <div class="lg:col-span-3">
+      <Card title="Direct Broadcast (Untranslated)">
+        <div class="flex flex-col md:flex-row items-center justify-between gap-6 p-4">
+          <div class="flex items-center gap-4 flex-1">
+            <div class="p-3 bg-primary/10 text-primary rounded-full">
+              <Volume2 class="w-6 h-6" />
+            </div>
+            <div class="flex-1 space-y-3">
+              <div>
+                <h2 class="text-lg font-bold">Original Source Audio</h2>
+                <p class="text-muted-foreground text-sm">Listen to the original broadcast without AI translation or subtitles.</p>
+              </div>
+              
+              <div class="space-y-2">
+                <div class="flex items-center gap-2 text-xxs text-primary/60 font-black uppercase tracking-widest">
+                  <Waves class="w-3 h-3" />
+                  Live Stream
+                </div>
+                <audio 
+                  controls 
+                  src="/api/audio/stream/default" 
+                  class="w-full h-10 rounded-lg opacity-80 hover:opacity-100 transition-opacity"
+                ></audio>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </div>
   </div>
 
   <div class="pt-12 text-center text-muted-foreground/40">

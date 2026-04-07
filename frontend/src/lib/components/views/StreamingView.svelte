@@ -113,45 +113,17 @@
         </Button>
         <div class="flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/30 text-primary text-xxs font-bold tracking-widest uppercase">
             <span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
-            Live Stream
+            AI Broadcast
         </div>
     </header>
-
-    <Card title="Main Audio Feed" class="glass shadow-2xl overflow-hidden border-primary/5">
-        <div class="space-y-8 p-2">
-            <div class="flex flex-col items-center text-center space-y-4 pt-6">
-                <div class="p-4 bg-primary/10 rounded-full text-primary">
-                    <Volume2 class="w-10 h-10" />
-                </div>
-                <div>
-                    <h1 class="text-2xl font-bold tracking-tight">Main Audio Feed</h1>
-                    <p class="text-muted-foreground text-sm">Real-time synchronized broadcast</p>
-                </div>
-            </div>
-
+ 
+    <Card title="AI Stream View" class="glass shadow-2xl overflow-hidden border-primary/5">
+        <div class="space-y-8 p-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-                <div class="space-y-6">
+                <!-- Left: Audio Stream -->
+                <div class="space-y-8 h-full flex flex-col justify-center">
                     <div class="space-y-4">
-                        <div class="p-4 bg-primary/5 rounded-xl border border-primary/10">
-                            <h3 class="text-sm font-bold text-primary uppercase tracking-widest mb-1">Standard Output</h3>
-                            <p class="text-xs text-muted-foreground">Monitoring Original (English) Broadcast</p>
-                        </div>
-                    </div>
-
-                <div class="space-y-4">
-                    <label for="stream-lang" class="text-xxs font-black uppercase tracking-extra text-muted-foreground flex justify-between">
-                        <span>Select Stream Language</span>
-                    </label>
-                    <LanguageSelector 
-                        selected={lang} 
-                        onchange={(val: string) => {
-                            goto(`/ai_live_audio/${val}`);
-                        }} 
-                    />
-                </div>
-
-                <div class="space-y-4">
-                    <span class="text-xxs font-black uppercase tracking-extra text-muted-foreground">Audio Controls</span>
+                        <span class="text-xxs font-black uppercase tracking-extra text-muted-foreground">Audio Stream</span>
                         {#key audioSource}
                             <audio 
                                 controls 
@@ -162,15 +134,16 @@
                         {/key}
                         <div class="flex items-center gap-2 text-xxs text-muted-foreground/60 font-medium italic">
                             <Waves class="w-3 h-3" />
-                            Supports background playback and lock-screen controls
+                            Live sync stream
                         </div>
                     </div>
                 </div>
-
+ 
+                <!-- Right: Subtitles -->
                 <div class="space-y-4">
                     <label class="text-xxs font-black uppercase tracking-extra text-muted-foreground flex justify-between">
                         <div class="flex items-center gap-2">
-                             <span>Live Subtitles</span>
+                             <span>AI Subtitles</span>
                              {#if subtitleState.totalTokens > 0}
                                 <span class="px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary animate-in fade-in transition-all">
                                     {subtitleState.totalTokens.toLocaleString()} tokens
@@ -182,7 +155,7 @@
                         {/if}
                     </label>
                     
-                    <div class="bg-black/40 rounded-xl border border-border/50 h-[600px] md:h-[700px] flex flex-col p-4 relative overflow-hidden group">
+                    <div class="bg-black/40 rounded-xl border border-border/50 h-[500px] md:h-[600px] flex flex-col p-4 relative overflow-hidden group">
                         <div 
                             class="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2 touch-pan-y"
                             style="-webkit-overflow-scrolling: touch;"
@@ -217,7 +190,7 @@
                     </div>
                 </div>
             </div>
-
+ 
             <div class="pt-4 border-t border-border/50 text-xxs text-center text-muted-foreground/40 uppercase tracking-ultra font-bold">
                 Direct Console Interface • AI Assisted Access
             </div>

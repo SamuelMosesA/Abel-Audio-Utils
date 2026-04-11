@@ -131,7 +131,7 @@ func (s *AppState) Engine() *EngineState {
 	return &s.engine
 }
 
-func (s *AppState) broadcast(sec Section) {
+func (s *AppState) Broadcast(sec Section) {
 	change := StateChange{
 		Section: sec.String(),
 	}

@@ -146,9 +146,13 @@ export class AIStore {
     }
 
     async setGeminiMaster(enabled: boolean) {
+        console.log("[AI] Toggling Gemini Master to:", enabled);
         const res = await fetchWithSync("/api/ai/streams", {
             method: "POST",
-            body: JSON.stringify({ action: "toggle_master", enabled: enabled })
+            body: JSON.stringify({ 
+                action: "toggle_master", 
+                enabled: enabled 
+            })
         });
         
         if (!res.ok) {

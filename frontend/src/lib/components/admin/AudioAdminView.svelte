@@ -17,7 +17,7 @@
         Activity,
     } from "lucide-svelte";
 
-    let selectedDeviceValue = $state<string | undefined>(undefined);
+    let selectedDeviceValue = $state<string>("");
     let isDirty = $state(false);
 
     ui.currentView = "admin";
@@ -26,6 +26,8 @@
     $effect(() => {
         if (audio.selectedDeviceId >= 0) {
             selectedDeviceValue = audio.selectedDeviceId.toString();
+        } else {
+            selectedDeviceValue = "";
         }
     });
 
@@ -41,7 +43,7 @@
     };
 
     const handleApplySettings = async () => {
-        const id = selectedDeviceValue ? Number(selectedDeviceValue) : null;
+        const id = selectedDeviceValue !== "" ? Number(selectedDeviceValue) : null;
         await audio.commitConfig(id);
         isDirty = false;
     };
@@ -141,7 +143,7 @@
                             onchange={handleDeviceChange}
                             disabled={audio.isRecording}
                         >
-                            <option value={undefined} disabled>Select interface...</option>
+                            <option value="" disabled>Select interface...</option>
                             {#each audio.devices as device}
                                 <option value={device.id.toString()}>
                                     [{device.id}] {device.name}

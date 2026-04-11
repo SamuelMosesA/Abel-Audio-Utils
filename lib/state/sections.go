@@ -54,7 +54,7 @@ func Update[T any](s *AppState, sec Section, fn func(*T)) error {
 	fn(typedPtr)
 
 	// Broadcast the change
-	s.broadcast(sec)
+	s.Broadcast(sec)
 
 	return nil
 }

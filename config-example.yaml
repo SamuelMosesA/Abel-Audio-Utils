@@ -28,7 +28,7 @@ cloud_drive_location: "./cloud_drive"
 
 # Translation (Gemini)
 # gemini_api_key: "YOUR_API_KEY_HERE"
-gemini_model: "models/gemini-2.0-flash-exp"
+gemini_model: "models/gemini-3.1-flash-live-preview"
 gemini_voice: "Zephyr"
 gemini_chunk_multiplier: 20
 

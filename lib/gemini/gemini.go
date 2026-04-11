@@ -62,6 +62,7 @@ type TranslationManager struct {
 	sessions    sync.Map // map[string]*TranslationSession
 	subscribers sync.Map // map[string][]chan string
 	mu          sync.Mutex
+	OnStateChange func()
 }
 
 func NewTranslationManager(apiKey, model, voice string) (*TranslationManager, error) {
@@ -125,7 +126,9 @@ func (m *TranslationManager) GetChannels(language string, subtitles bool) chan [
 		lastResponse: time.Now(),
 	}
 	m.sessions.Store(language, session)
-
+	if m.OnStateChange != nil {
+		m.OnStateChange()
+	}
 	go m.runSession(session)
 
 	return audioOut
@@ -179,6 +182,9 @@ func (m *TranslationManager) CloseAll() {
 		s.cancel()
 		return true
 	})
+	if m.OnStateChange != nil {
+		m.OnStateChange()
+	}
 }
 
 func (m *TranslationManager) ListSessions() []state.SessionInfo {
@@ -199,13 +205,21 @@ func (m *TranslationManager) StopSession(language string, subtitles bool) {
 	log.Printf("[GEMINI] Force stopping session for %s", language)
 	if val, ok := m.sessions.Load(language); ok {
 		val.(*TranslationSession).cancel()
+		if m.OnStateChange != nil {
+			m.OnStateChange()
+		}
 	}
 }
 
 func (m *TranslationManager) runSession(s *TranslationSession) {
 	log.Printf("[GEMINI] runSession started for language: %s, model: %s", s.Language, m.model)
 	defer log.Printf("[GEMINI] runSession exited for language: %s", s.Language)
-	defer m.sessions.Delete(s.Language)
+	defer func() {
+		m.sessions.Delete(s.Language)
+		if m.OnStateChange != nil {
+			m.OnStateChange()
+		}
+	}()
 
 	log.Printf("[GEMINI] Starting translation session for %s", s.Language)
 
@@ -259,10 +273,9 @@ Your task: Transcribe the incoming English audio stream and repeat it.
 Rules:
 1. Output transcription for every word heard.
 2. The sermon is from a reformed baptist tradition in Amsterdam; use appropriate theological terminology.
-3. There might be multiple people speaking. Transcribe with [Speaker 1], [Speaker 2], etc. Do not wait for them to finish before audio output.
-4. DO NOT WAIT FOR PAUSES.
-5. Continuously output without waiting for a pause. I want lower latency between input and output.
-6. Stream word by word, token by token, as you hear it.`)
+3. DO NOT WAIT FOR PAUSES.
+4. Continuously output without waiting for a pause. I want lower latency between input and output.
+5. Stream word by word, token by token, as you hear it.`)
 					}
 					return genai.NewPartFromText(fmt.Sprintf(`You are a professional real-time translator. 
 Your task: Translate the incoming English audio stream into %s.

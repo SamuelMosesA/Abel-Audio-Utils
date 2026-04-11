@@ -65,6 +65,9 @@ func main() {
 			fmt.Printf("[GEMINI] Warning: Failed to init Translation Manager: %v\n", err)
 		} else {
 			appState.Translator = tm
+			tm.OnStateChange = func() {
+				appState.Broadcast(state.SectionGemini)
+			}
 			state.Update[state.GeminiConfig](appState, state.SectionGemini, func(s *state.GeminiConfig) {
 				s.SetEnabled(false)
 			})

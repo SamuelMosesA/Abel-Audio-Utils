@@ -27,35 +27,43 @@ import (
 func UpdateAIStreams(appState *state.AppState, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Action    string    `json:"action"`
-			Enabled   *bool     `json:"enabled"`
-			Language  string    `json:"language"`
-			Subtitles bool      `json:"subtitles"`
+			Action    string `json:"action"`
+			Enabled   *bool  `json:"enabled"`
+			Language  string `json:"language"`
+			Subtitles bool   `json:"subtitles"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 			return
 		}
 
-		fmt.Printf("[AI] API Action: %s (lang: %s, enabled: %v)\n", req.Action, req.Language, req.Enabled)
-
+		var shouldCloseAll bool
 		state.Update[state.GeminiConfig](appState, state.SectionGemini, func(s *state.GeminiConfig) {
 			if req.Action == "toggle_master" && req.Enabled != nil {
+				fmt.Printf("[AI] Toggling master to: %v (Current state: %v)\n", *req.Enabled, s.IsEnabled())
 				s.SetEnabled(*req.Enabled)
-				if appState.Translator != nil {
-					appState.Translator.SetEnabled(*req.Enabled)
-					if !*req.Enabled {
-						appState.Translator.CloseAll()
-					}
+				if !*req.Enabled {
+					shouldCloseAll = true
 				}
-			} else if req.Action == "stop_translation" && req.Language != "" {
-				if appState.Translator != nil {
-					resolved := cfg.ResolveLanguageName(req.Language)
-					fmt.Printf("[AI] Stopping translation for: %s (resolved: %s)\n", req.Language, resolved)
-					appState.Translator.StopSession(resolved, true)
-				}
+				fmt.Printf("[AI] Master state now: %v\n", s.IsEnabled())
 			}
 		})
+
+		// Perform side-effects OUTSIDE of the lock
+		if req.Action == "toggle_master" && req.Enabled != nil && appState.Translator != nil {
+			appState.Translator.SetEnabled(*req.Enabled)
+			if shouldCloseAll {
+				appState.Translator.CloseAll()
+			}
+		}
+
+		if req.Action == "stop_translation" && req.Language != "" {
+			if appState.Translator != nil {
+				resolved := cfg.ResolveLanguageName(req.Language)
+				fmt.Printf("[AI] Stopping translation for: %s (resolved: %s)\n", req.Language, resolved)
+				appState.Translator.StopSession(resolved, true)
+			}
+		}
 
 		c.JSON(http.StatusOK, gin.H{"status": "Gemini action completed"})
 	}
@@ -71,7 +79,7 @@ func UpdateAIStreams(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 func GetAIStreamsStatus(appState *state.AppState) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		status := gin.H{
-			"masterEnabled": appState.Gemini().Enabled(),
+			"masterEnabled": appState.Gemini().IsEnabled(),
 		}
 		if appState.Translator != nil {
 			status["sessions"] = appState.Translator.ListSessions()
@@ -151,7 +159,7 @@ func SubtitlesHandler(appState *state.AppState, cfg *config.Config) gin.HandlerF
 		}
 
 		// Initial keep-alive or state check
-		if !appState.Gemini().Enabled() {
+		if !appState.Gemini().IsEnabled() {
 			fmt.Fprintf(c.Writer, "data: %s\n\n", `{"error": "Gemini Master Switch is OFF"}`)
 			flusher.Flush()
 		}

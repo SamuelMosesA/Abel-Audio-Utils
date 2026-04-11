@@ -22,11 +22,11 @@ func (c *InterfaceConfig) SetChR(ch int32)     { c.chR = ch }
 func (c *InterfaceConfig) SetBoost(b float64)  { c.boost = b }
 
 type GeminiConfig struct {
-	enabled bool
+	Enabled bool
 }
 
-func (c GeminiConfig) Enabled() bool { return c.enabled }
-func (c *GeminiConfig) SetEnabled(b bool) { c.enabled = b }
+func (c GeminiConfig) IsEnabled() bool { return c.Enabled }
+func (c *GeminiConfig) SetEnabled(b bool) { c.Enabled = b }
 
 type configState struct {
 	interfaceCfg InterfaceConfig

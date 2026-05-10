@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AudioStore, AIStore, SystemStore, UIStore } from './audioState.svelte';
 
-// Mock fetch
-global.fetch = vi.fn();
 
 describe('Modular Stores', () => {
     beforeEach(() => {
@@ -23,7 +21,10 @@ describe('Modular Stores', () => {
         });
 
         it('should commit config', async () => {
-            (fetch as any).mockResolvedValue({ ok: true });
+            (fetch as any).mockResolvedValue({ 
+                ok: true,
+                json: async () => ({})
+            });
             const store = new AudioStore();
             store.chL = 5;
             await store.commitConfig(1);

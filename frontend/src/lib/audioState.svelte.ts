@@ -180,7 +180,7 @@ export class SystemStore {
     onMessage: ((dv: DataView) => void) | null = null;
 
     constructor(private ui: UIStore, private audio: AudioStore, private ai: AIStore) {
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined' && window.localStorage) {
             this.sessionId = localStorage.getItem("session_id") || "";
             this.isAuthenticated = !!this.sessionId;
             
@@ -268,10 +268,14 @@ export class SystemStore {
 
             if (res.ok) {
                 const data = await res.json();
-                localStorage.setItem("admin_user", username);
+                if (typeof window !== 'undefined' && window.localStorage) {
+                    localStorage.setItem("admin_user", username);
+                }
                 if (data.session) {
                     this.sessionId = data.session;
-                    localStorage.setItem("session_id", data.session);
+                    if (typeof window !== 'undefined' && window.localStorage) {
+                        localStorage.setItem("session_id", data.session);
+                    }
                 }
                 this.isAuthenticated = true;
                 this.setupSSE();
@@ -286,8 +290,10 @@ export class SystemStore {
     }
 
     logout() {
-        localStorage.removeItem("admin_user");
-        localStorage.removeItem("session_id");
+        if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.removeItem("admin_user");
+            localStorage.removeItem("session_id");
+        }
         this.isAuthenticated = false;
         this.sessionId = "";
         this.ui.currentView = "landing";

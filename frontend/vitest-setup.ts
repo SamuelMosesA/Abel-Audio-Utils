@@ -25,7 +25,7 @@ class MockEventSource {
     close = vi.fn();
     onmessage = null;
     onerror = null;
-    constructor(url: string, init?: any) {}
+    constructor(url: string, init?: any) { }
 }
 global.EventSource = MockEventSource as any;
 
@@ -39,7 +39,7 @@ class MockWebSocket {
     onmessage = null;
     onclose = null;
     onerror = null;
-    constructor(url: string) {}
+    constructor(url: string) { }
 }
 global.WebSocket = MockWebSocket as any;
 

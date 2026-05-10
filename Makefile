@@ -7,13 +7,16 @@ STATIC_DIR=static
 build: build-frontend build-backend
 
 build-frontend:
+	@echo "Installing frontend dependencies..."
+	cd $(FRONTEND_DIR) && npm install
+	$(MAKE) test-frontend
 	@echo "Building frontend..."
-	cd $(FRONTEND_DIR) && npm install && npm run build
+	cd $(FRONTEND_DIR) && npm run build
 	mkdir -p $(STATIC_DIR)
 	rm -rf $(STATIC_DIR)/*
 	cp -r $(FRONTEND_DIR)/build/* $(STATIC_DIR)/
 
-build-backend:
+build-backend: test-backend
 	@echo "Generating Swagger docs..."
 	go run github.com/swaggo/swag/cmd/swag@latest init
 	@echo "Building backend..."

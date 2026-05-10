@@ -6,7 +6,7 @@ type Section int
 
 const (
 	SectionInterface Section = iota
-	SectionGemini
+	SectionAI
 	SectionRecording
 	SectionLocations
 )
@@ -15,8 +15,8 @@ func (s Section) String() string {
 	switch s {
 	case SectionInterface:
 		return "interface"
-	case SectionGemini:
-		return "gemini"
+	case SectionAI:
+		return "ai"
 	case SectionRecording:
 		return "recording"
 	case SectionLocations:
@@ -36,8 +36,8 @@ func Update[T any](s *AppState, sec Section, fn func(*T)) error {
 	switch sec {
 	case SectionInterface:
 		sectionPtr = &s.config.interfaceCfg
-	case SectionGemini:
-		sectionPtr = &s.config.geminiCfg
+	case SectionAI:
+		sectionPtr = &s.config.aiCfg
 	case SectionRecording:
 		sectionPtr = &s.intent
 	case SectionLocations:

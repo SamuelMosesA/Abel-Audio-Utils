@@ -26,8 +26,15 @@ type Config struct {
 	AdminUserCredentials  string  `yaml:"admin_user_credentials"`
 	GeminiAPIKey          string  `yaml:"gemini_api_key"`
 	GeminiModel           string  `yaml:"gemini_model"`
-	GeminiChunkMultiplier int     `yaml:"gemini_chunk_multiplier"`
 	GeminiVoice           string  `yaml:"gemini_voice"`
+	GeminiAudioInBufferSize int    `yaml:"gemini_audio_in_buffer_size"`
+	GeminiAudioOutBufferSize int   `yaml:"gemini_audio_out_buffer_size"`
+	GeminiSubtitleBufferSize int   `yaml:"gemini_subtitle_buffer_size"`
+	AIProvider            string       `yaml:"ai_provider"`
+	OpenAIAPIKey          string       `yaml:"openai_api_key"`
+	OpenAITranslateModel  string       `yaml:"openai_translate_model"`
+	OpenAITranscribeModel string       `yaml:"openai_transcribe_model"`
+	OpenAIVoice           string       `yaml:"openai_voice"`
 	AILanguages           []AILanguage `yaml:"ai_languages"`
 	AIOriginalLanguage    string       `yaml:"ai_original_language"`
 
@@ -47,6 +54,16 @@ func (cfg *Config) ResolveLanguageName(code string) string {
 		return strings.ToUpper(code[:1]) + code[1:]
 	}
 	return code
+}
+
+func (cfg *Config) ResolveLanguageCode(name string) string {
+	lowerName := strings.ToLower(name)
+	for _, l := range cfg.AILanguages {
+		if strings.ToLower(l.Name) == lowerName {
+			return l.Code
+		}
+	}
+	return name
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -92,8 +109,30 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.GeminiVoice == "" {
 		cfg.GeminiVoice = "Zephyr"
 	}
-	if cfg.GeminiChunkMultiplier <= 0 {
-		cfg.GeminiChunkMultiplier = 1
+	if cfg.GeminiAudioInBufferSize <= 0 {
+		cfg.GeminiAudioInBufferSize = 100
+	}
+	if cfg.GeminiAudioOutBufferSize <= 0 {
+		cfg.GeminiAudioOutBufferSize = 1000
+	}
+	if cfg.GeminiSubtitleBufferSize <= 0 {
+		cfg.GeminiSubtitleBufferSize = 100
+	}
+	if cfg.AIProvider == "" {
+		cfg.AIProvider = "gemini"
+	}
+	if cfg.OpenAIAPIKey == "" {
+		cfg.OpenAIAPIKey = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	}
+	cfg.OpenAIAPIKey = strings.TrimSpace(cfg.OpenAIAPIKey)
+	if cfg.OpenAITranslateModel == "" {
+		cfg.OpenAITranslateModel = "gpt-realtime-translate"
+	}
+	if cfg.OpenAITranscribeModel == "" {
+		cfg.OpenAITranscribeModel = "gpt-realtime-whisper"
+	}
+	if cfg.OpenAIVoice == "" {
+		cfg.OpenAIVoice = "alloy"
 	}
 
 	if cfg.AIOriginalLanguage == "" {

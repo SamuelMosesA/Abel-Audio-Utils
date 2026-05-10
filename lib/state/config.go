@@ -21,14 +21,14 @@ func (c *InterfaceConfig) SetChL(ch int32)     { c.chL = ch }
 func (c *InterfaceConfig) SetChR(ch int32)     { c.chR = ch }
 func (c *InterfaceConfig) SetBoost(b float64)  { c.boost = b }
 
-type GeminiConfig struct {
+type AIConfig struct {
 	Enabled bool
 }
 
-func (c GeminiConfig) IsEnabled() bool { return c.Enabled }
-func (c *GeminiConfig) SetEnabled(b bool) { c.Enabled = b }
+func (c AIConfig) IsEnabled() bool { return c.Enabled }
+func (c *AIConfig) SetEnabled(b bool) { c.Enabled = b }
 
 type configState struct {
 	interfaceCfg InterfaceConfig
-	geminiCfg    GeminiConfig
+	aiCfg        AIConfig
 }

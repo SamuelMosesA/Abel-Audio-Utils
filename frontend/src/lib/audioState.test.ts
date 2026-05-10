@@ -35,7 +35,7 @@ describe('Modular Stores', () => {
     });
 
     describe('AIStore', () => {
-        it('should toggle gemini master with correct casing', async () => {
+        it('should toggle AI master with correct casing', async () => {
             const ui = new UIStore();
             const store = new AIStore(ui);
             (fetch as any).mockResolvedValue({ 
@@ -43,7 +43,7 @@ describe('Modular Stores', () => {
                 json: async () => ({})
             });
             
-            await store.setGeminiMaster(true);
+            await store.setAIMaster(true);
             
             expect(fetch).toHaveBeenCalledWith('/api/ai/streams', expect.objectContaining({
                 method: 'POST',

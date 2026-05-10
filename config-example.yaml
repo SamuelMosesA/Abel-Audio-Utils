@@ -26,11 +26,22 @@ storage_location: "./recordings"
 # Target directory for the "Push to Cloud" feature.
 cloud_drive_location: "./cloud_drive"
 
+# AI Provider (gemini or openai)
+ai_provider: "gemini"
+
 # Translation (Gemini)
 # gemini_api_key: "YOUR_API_KEY_HERE"
-gemini_model: "models/gemini-3.1-flash-live-preview"
+gemini_model: "models/gemini-2.5-flash-native-audio-preview-12-2025"
 gemini_voice: "Zephyr"
-gemini_chunk_multiplier: 20
+gemini_audio_in_buffer_size: 100
+gemini_audio_out_buffer_size: 1000
+gemini_subtitle_buffer_size: 100
+
+# Translation (OpenAI)
+# openai_api_key: "YOUR_API_KEY_HERE"
+openai_translate_model: "gpt-realtime-translate"
+openai_transcribe_model: "gpt-realtime-whisper"
+openai_voice: "alloy"
 
 # AI Language Settings
 ai_original_language: "English"

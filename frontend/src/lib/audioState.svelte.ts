@@ -99,7 +99,7 @@ export class AudioStore {
 }
 
 export class AIStore {
-    geminiMasterEnabled = $state(false);
+    aiMasterEnabled = $state(false);
     translations = $state<TranslationSession[]>([]);
     aiConfig = $state<{ languages: { code: string, name: string }[], originalLanguage: string }>({
         languages: [],
@@ -112,12 +112,12 @@ export class AIStore {
         try {
             const res = await fetch("/api/ai/streams", { credentials: "include" });
             if (res.ok) {
-                const gemini = await res.json();
-                this.geminiMasterEnabled = gemini.masterEnabled;
-                this.translations = gemini.sessions || [];
+                const aiData = await res.json();
+                this.aiMasterEnabled = aiData.masterEnabled;
+                this.translations = aiData.sessions || [];
             }
         } catch (e) {
-            console.error("Error syncing Gemini status", e);
+            console.error("Error syncing AI status", e);
         }
     }
 
@@ -145,8 +145,8 @@ export class AIStore {
         await this.sync();
     }
 
-    async setGeminiMaster(enabled: boolean) {
-        console.log("[AI] Toggling Gemini Master to:", enabled);
+    async setAIMaster(enabled: boolean) {
+        console.log("[AI] Toggling AI Master to:", enabled);
         const res = await fetchWithSync("/api/ai/streams", {
             method: "POST",
             body: JSON.stringify({ 
@@ -157,9 +157,14 @@ export class AIStore {
         
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            this.ui.showNotification(data.error || "Failed to toggle Gemini", "error");
+            this.ui.showNotification(data.error || "Failed to toggle AI", "error");
         }
         await this.sync();
+    }
+
+    resolveLanguageName(code: string): string {
+        const lang = this.aiConfig.languages.find(l => l.code === code);
+        return lang ? lang.name : code;
     }
 }
 
@@ -220,7 +225,7 @@ export class SystemStore {
     }
 
     private handleRemoteUpdate(change: { section: string, sessionId: string }) {
-        if (change.section === "gemini") this.ai.sync();
+        if (change.section === "ai") this.ai.sync();
         else if (change.section === "interface" || change.section === "recording") this.audio.sync();
         else this.audio.sync();
         

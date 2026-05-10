@@ -15,7 +15,7 @@ import (
 
 func TestGetAIStreamsStatus(t *testing.T) {
 	appState := state.NewAppState("", "")
-	state.Update[state.GeminiConfig](appState, state.SectionGemini, func(s *state.GeminiConfig) {
+	state.Update[state.AIConfig](appState, state.SectionAI, func(s *state.AIConfig) {
 		s.SetEnabled(true)
 	})
 	cfg := &config.Config{}
@@ -37,7 +37,7 @@ func TestGetAIStreamsStatus(t *testing.T) {
 
 func TestSubtitlesHandler(t *testing.T) {
 	appState := state.NewAppState("", "")
-	state.Update[state.GeminiConfig](appState, state.SectionGemini, func(s *state.GeminiConfig) {
+	state.Update[state.AIConfig](appState, state.SectionAI, func(s *state.AIConfig) {
 		s.SetEnabled(true)
 	})
 	mockTranslator := &MockTranslator{}

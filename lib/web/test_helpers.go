@@ -59,5 +59,6 @@ func (m *MockTranslator) GetSubtitles(lang string) (chan string, func()) {
 func (m *MockTranslator) StopSession(lang string, subs bool) {}
 func (m *MockTranslator) CloseAll() {}
 func (m *MockTranslator) PushAudio(samples []float32) {}
+func (m *MockTranslator) SetOnStateChange(fn func()) {}
 
 var testCfg = &config.Config{}

@@ -63,8 +63,8 @@
             eventSource = null;
         }
         
-        // Subtitles are now always on if Gemini is enabled
-        if (ai.geminiMasterEnabled) {
+        // Subtitles are now always on if AI is enabled
+        if (ai.aiMasterEnabled) {
             eventSource = new EventSource(`/api/ai/subtitles?lang=${lang}`);
             eventSource.onmessage = async (e) => {
                 try {
@@ -117,7 +117,7 @@
         </div>
     </header>
  
-    <Card title="AI Stream View" class="glass shadow-2xl overflow-hidden border-primary/5">
+    <Card title="AI Stream View ({ai.resolveLanguageName(lang)})" class="glass shadow-2xl overflow-hidden border-primary/5">
         <div class="space-y-8 p-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
                 <!-- Left: Audio Stream -->
@@ -162,7 +162,7 @@
                             bind:this={scrollContainerRef}
                             onscroll={handleScroll}
                         >
-                            {#if !ai.geminiMasterEnabled}
+                            {#if !ai.aiMasterEnabled}
                                 <div class="h-full flex flex-col items-center justify-center text-center p-4">
                                     <Globe class="w-8 h-8 text-muted/20 mb-2" />
                                     <p class="text-xs text-muted-foreground font-medium">Translation unavailable</p>

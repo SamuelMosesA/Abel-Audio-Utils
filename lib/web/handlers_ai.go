@@ -13,7 +13,7 @@ import (
 )
 
 // @Summary Control AI streams
-// @Description Toggles master gemini switch or stops a specific language translation
+// @Description Toggles master AI switch or stops a specific language translation
 // @Tags AI
 // @Accept json
 // @Produce json
@@ -38,7 +38,7 @@ func UpdateAIStreams(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 		}
 
 		var shouldCloseAll bool
-		state.Update[state.GeminiConfig](appState, state.SectionGemini, func(s *state.GeminiConfig) {
+		state.Update[state.AIConfig](appState, state.SectionAI, func(s *state.AIConfig) {
 			if req.Action == "toggle_master" && req.Enabled != nil {
 				fmt.Printf("[AI] Toggling master to: %v (Current state: %v)\n", *req.Enabled, s.IsEnabled())
 				s.SetEnabled(*req.Enabled)
@@ -65,7 +65,7 @@ func UpdateAIStreams(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 			}
 		}
 
-		c.JSON(http.StatusOK, gin.H{"status": "Gemini action completed"})
+		c.JSON(http.StatusOK, gin.H{"status": "AI action completed"})
 	}
 }
 
@@ -79,7 +79,7 @@ func UpdateAIStreams(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 func GetAIStreamsStatus(appState *state.AppState) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		status := gin.H{
-			"masterEnabled": appState.Gemini().IsEnabled(),
+			"masterEnabled": appState.AI().IsEnabled(),
 		}
 		if appState.Translator != nil {
 			status["sessions"] = appState.Translator.ListSessions()
@@ -121,14 +121,13 @@ func SubtitlesHandler(appState *state.AppState, cfg *config.Config) gin.HandlerF
 			lang = strings.TrimPrefix(lang, "/")
 		}
 
-		resolvedLang := cfg.ResolveLanguageName(lang)
-		// If it's the original language, we still want subtitles if Gemini is enabled
-		// but we should use the proper name "English" (or whatever is in config)
+		// Use the language code directly
 		if lang == "" || lang == "default" || lang == "subtitles" {
-			resolvedLang = cfg.AIOriginalLanguage
+			lang = cfg.AIOriginalLanguage
 		}
+		resolvedLang := cfg.ResolveLanguageName(lang)
 
-		log.Printf("[SERVER] Subtitles connection requested for lang: %s (resolved: %s) (IP: %s)", lang, resolvedLang, c.Request.RemoteAddr)
+		log.Printf("[SERVER] Subtitles connection requested for lang: %s (name: %s) (IP: %s)", lang, resolvedLang, c.Request.RemoteAddr)
 
 		if appState.Translator == nil {
 			log.Printf("[SERVER] Subtitles handler aborted: Translator is nil")
@@ -141,7 +140,7 @@ func SubtitlesHandler(appState *state.AppState, cfg *config.Config) gin.HandlerF
 		c.Header("Connection", "keep-alive")
 		c.Header("Access-Control-Allow-Origin", "*")
 
-		ch, cleanup := appState.Translator.GetSubtitles(resolvedLang)
+		ch, cleanup := appState.Translator.GetSubtitles(lang)
 		if ch == nil {
 			log.Printf("[SERVER] Failed to get subtitle channel for lang: %s (resolved: %s)", lang, resolvedLang)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get subtitle channel"})
@@ -159,8 +158,8 @@ func SubtitlesHandler(appState *state.AppState, cfg *config.Config) gin.HandlerF
 		}
 
 		// Initial keep-alive or state check
-		if !appState.Gemini().IsEnabled() {
-			fmt.Fprintf(c.Writer, "data: %s\n\n", `{"error": "Gemini Master Switch is OFF"}`)
+		if !appState.AI().IsEnabled() {
+			fmt.Fprintf(c.Writer, "data: %s\n\n", `{"error": "AI Master Switch is OFF"}`)
 			flusher.Flush()
 		}
 

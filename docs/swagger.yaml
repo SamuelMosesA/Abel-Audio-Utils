@@ -53,7 +53,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Toggles master gemini switch or stops a specific language translation
+      description: Toggles master AI switch or stops a specific language translation
       parameters:
       - description: AI Action
         in: body

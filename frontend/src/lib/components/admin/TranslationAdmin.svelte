@@ -5,14 +5,15 @@
     import Button from "../ui/Button.svelte";
     import { Languages, XCircle, Users, Activity } from "lucide-svelte";
 
-    async function handleStop(lang: string) {
-        if (confirm(`Are you sure you want to stop the ${lang} translation?`)) {
-            await ai.stopTranslation(lang);
+    async function handleStop(langCode: string) {
+        const langName = ai.resolveLanguageName(langCode);
+        if (confirm(`Are you sure you want to stop the ${langName} translation?`)) {
+            await ai.stopTranslation(langCode);
         }
     }
 
     async function toggleMaster() {
-        await ai.setGeminiMaster(!ai.geminiMasterEnabled);
+        await ai.setAIMaster(!ai.aiMasterEnabled);
     }
 </script>
 
@@ -20,18 +21,18 @@
     <div class="space-y-6">
         <div class="flex items-center justify-between bg-muted/30 p-4 rounded-xl border border-border/40">
             <div class="flex items-center gap-3">
-                <div class="flex h-3 w-3 rounded-full {ai.geminiMasterEnabled ? 'bg-primary animate-pulse' : 'bg-destructive'}"></div>
+                <div class="flex h-3 w-3 rounded-full {ai.aiMasterEnabled ? 'bg-primary animate-pulse' : 'bg-destructive'}"></div>
                 <div class="flex flex-col">
-                    <span class="text-xxs font-black uppercase tracking-widest text-muted-foreground">Gemini Master Switch</span>
-                    <span class="text-sm font-bold text-white">{ai.geminiMasterEnabled ? 'SYSTEM ACTIVE' : 'SYSTEM DISABLED'}</span>
+                    <span class="text-xxs font-black uppercase tracking-widest text-muted-foreground">AI Master Switch</span>
+                    <span class="text-sm font-bold text-white">{ai.aiMasterEnabled ? 'SYSTEM ACTIVE' : 'SYSTEM DISABLED'}</span>
                 </div>
             </div>
             <Button 
-                variant={ai.geminiMasterEnabled ? "destructive" : "primary"}
+                variant={ai.aiMasterEnabled ? "destructive" : "primary"}
                 size="sm"
                 onclick={toggleMaster}
             >
-                {ai.geminiMasterEnabled ? "Disable" : "Enable"} Gemini
+                {ai.aiMasterEnabled ? "Disable" : "Enable"} AI
             </Button>
         </div>
 
@@ -49,7 +50,7 @@
                                 {session.language.substring(0, 2)}
                             </div>
                             <div class="flex flex-col">
-                                <span class="font-bold text-sm tracking-tight capitalize text-white">{session.language}</span>
+                                <span class="font-bold text-sm tracking-tight capitalize text-white">{ai.resolveLanguageName(session.language)}</span>
                                 <div class="flex items-center gap-2 text-xxs text-muted-foreground font-black uppercase tracking-widest">
                                     <Users class="w-3 h-3" />
                                     <span>External Feed</span>

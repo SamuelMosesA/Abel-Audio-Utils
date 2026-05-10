@@ -30,9 +30,7 @@ func CalculatePeakMeters(buffer []float32) (float32, float32) {
 func StartAudioBroadcaster(appState *state.AppState, cfg *config.Config, playbackChan <-chan []float32) {
 	go func() {
 		count := 0
-		geminiChunkCount := 0
-		totalGeminiPush := 0
-		geminiBuffer := make([]float32, 0, cfg.BufferSize*2*cfg.GeminiChunkMultiplier)
+		totalAIPush := 0
 
 		for chunk := range playbackChan {
 			// Calculate peak meters for the chunk
@@ -67,21 +65,15 @@ func StartAudioBroadcaster(appState *state.AppState, cfg *config.Config, playbac
 				return true
 			})
 
-			// Push to Gemini for translation
+			// Push to AI for translation
 			if appState.Translator != nil {
-				geminiBuffer = append(geminiBuffer, chunk...)
-				geminiChunkCount++
-				if geminiChunkCount >= cfg.GeminiChunkMultiplier {
-					appState.Translator.PushAudio(geminiBuffer)
-					totalGeminiPush++
-					geminiBuffer = make([]float32, 0, cfg.BufferSize*2*cfg.GeminiChunkMultiplier)
-					geminiChunkCount = 0
-				}
+				appState.Translator.PushAudio(chunk)
+				totalAIPush++
 			}
 
 			count++
 			if count%100 == 0 {
-				log.Printf("[BROADCAST] Processed %d raw chunks (Gemini Pushes: %d)", count, totalGeminiPush)
+				log.Printf("[BROADCAST] Processed %d raw chunks (AI Pushes: %d)", count, totalAIPush)
 			}
 		}
 	}()

@@ -3,6 +3,7 @@ package main
 import (
 	"behringerRecorder/lib/config"
 	"behringerRecorder/lib/gemini"
+	"behringerRecorder/lib/openai"
 	"behringerRecorder/lib/audioengine"
 	"behringerRecorder/lib/state"
 	"behringerRecorder/lib/web"
@@ -58,21 +59,27 @@ func main() {
 		s.SetDeviceID(-1)
 	})
 
-	// Initialize Translation Manager if API key provided
-	if cfg.GeminiAPIKey != "" {
-		tm, err := gemini.NewTranslationManager(cfg.GeminiAPIKey, cfg.GeminiModel, cfg.GeminiVoice)
-		if err != nil {
-			fmt.Printf("[GEMINI] Warning: Failed to init Translation Manager: %v\n", err)
-		} else {
-			appState.Translator = tm
-			tm.OnStateChange = func() {
-				appState.Broadcast(state.SectionGemini)
-			}
-			state.Update[state.GeminiConfig](appState, state.SectionGemini, func(s *state.GeminiConfig) {
-				s.SetEnabled(false)
-			})
-			fmt.Printf("[GEMINI] Translation manager ready (disabled by default) using model: %s\n", cfg.GeminiModel)
-		}
+	// Initialize AI Translation/Transcription Manager
+	var tm state.Translator
+	var initErr error
+
+	if cfg.AIProvider == "openai" && cfg.OpenAIAPIKey != "" {
+		tm, initErr = openai.NewOpenAIManager(cfg, cfg.OpenAIAPIKey, cfg.OpenAITranslateModel, cfg.OpenAITranscribeModel, cfg.OpenAIVoice, cfg.AIOriginalLanguage, cfg.GeminiAudioInBufferSize, cfg.GeminiAudioOutBufferSize, cfg.GeminiSubtitleBufferSize)
+	} else if cfg.GeminiAPIKey != "" {
+		tm, initErr = gemini.NewTranslationManager(cfg.GeminiAPIKey, cfg.GeminiModel, cfg.GeminiVoice, cfg.GeminiAudioInBufferSize, cfg.GeminiAudioOutBufferSize, cfg.GeminiSubtitleBufferSize)
+	}
+
+	if initErr != nil {
+		fmt.Printf("[AI] Warning: Failed to init Translation Manager: %v\n", initErr)
+	} else if tm != nil {
+		appState.Translator = tm
+		tm.SetOnStateChange(func() {
+			appState.Broadcast(state.SectionAI)
+		})
+		state.Update[state.AIConfig](appState, state.SectionAI, func(s *state.AIConfig) {
+			s.SetEnabled(false)
+		})
+		fmt.Printf("[AI] Translation manager ready using provider: %s\n", cfg.AIProvider)
 	}
 
 	allDevices, _ := pa.Devices()

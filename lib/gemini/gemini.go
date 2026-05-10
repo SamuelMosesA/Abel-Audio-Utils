@@ -20,15 +20,14 @@ func ptr[T any](v T) *T {
 }
 
 type TranslationSession struct {
-	Language  string
-	AudioIn   chan []byte // PCM 16kHz Mono bytes
-	AudioOut  chan []float32
-	Subtitles bool
-	ctx       context.Context
-	cancel    context.CancelFunc
-	lastDropLog time.Time
+	Language     string
+	AudioIn      chan []byte // PCM 16kHz Mono bytes
+	AudioOut     chan []float32
+	Subtitles    bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	lastDropLog  time.Time
 	lastResponse time.Time
-	isStalled    bool
 }
 
 type GeminiClient interface {
@@ -54,18 +53,22 @@ func (c *RealGeminiClient) Connect(ctx context.Context, model string, config *ge
 }
 
 type TranslationManager struct {
-	client      GeminiClient
-	model       string
-	voice       string
-	Enabled     atomic.Bool
+	client             GeminiClient
+	model              string
+	voice              string
+	audioInBufferSize  int
+	audioOutBufferSize int
+	subtitleBufferSize int
+	Enabled            atomic.Bool
 
-	sessions    sync.Map // map[string]*TranslationSession
-	subscribers sync.Map // map[string][]chan string
-	mu          sync.Mutex
+	lastRestart   sync.Map // map[string]time.Time
+	sessions      sync.Map // map[string]*TranslationSession
+	subscribers   sync.Map // map[string][]chan string
+	mu            sync.Mutex
 	OnStateChange func()
 }
 
-func NewTranslationManager(apiKey, model, voice string) (*TranslationManager, error) {
+func NewTranslationManager(apiKey, model, voice string, audioInSize, audioOutSize, subtitleSize int) (*TranslationManager, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("gemini api key is required")
 	}
@@ -82,9 +85,12 @@ func NewTranslationManager(apiKey, model, voice string) (*TranslationManager, er
 	}
 
 	return &TranslationManager{
-		client: &RealGeminiClient{client: client},
-		model:  model,
-		voice:  voice,
+		client:             &RealGeminiClient{client: client},
+		model:              model,
+		voice:              voice,
+		audioInBufferSize:  audioInSize,
+		audioOutBufferSize: audioOutSize,
+		subtitleBufferSize: subtitleSize,
 	}, nil
 }
 
@@ -113,16 +119,16 @@ func (m *TranslationManager) GetChannels(language string, subtitles bool) chan [
 		return val.(*TranslationSession).AudioOut
 	}
 
-	audioOut := make(chan []float32, 100)
-	audioIn := make(chan []byte, 100)
+	audioOut := make(chan []float32, m.audioOutBufferSize)
+	audioIn := make(chan []byte, m.audioInBufferSize)
 	ctx, cancel := context.WithCancel(context.Background())
 	session := &TranslationSession{
-		Language:  language,
-		AudioIn:   audioIn,
-		AudioOut:  audioOut,
-		Subtitles: true,
-		ctx:       ctx,
-		cancel:    cancel,
+		Language:     language,
+		AudioIn:      audioIn,
+		AudioOut:     audioOut,
+		Subtitles:    true,
+		ctx:          ctx,
+		cancel:       cancel,
 		lastResponse: time.Now(),
 	}
 	m.sessions.Store(language, session)
@@ -142,7 +148,7 @@ func (m *TranslationManager) GetSubtitles(language string) (chan string, func())
 	// Ensure session exists
 	m.GetChannels(language, true)
 
-	subCh := make(chan string, 10)
+	subCh := make(chan string, m.subtitleBufferSize)
 	m.mu.Lock()
 	var subs []chan string
 	if val, ok := m.subscribers.Load(language); ok {
@@ -237,22 +243,20 @@ func (m *TranslationManager) runSession(s *TranslationSession) {
 	}
 
 	config := &genai.LiveConnectConfig{
-		ResponseModalities: modalities,
-		MediaResolution:    genai.MediaResolutionMedium,
-		InputAudioTranscription: &genai.AudioTranscriptionConfig{
-		},
-		OutputAudioTranscription: &genai.AudioTranscriptionConfig{
-		},
+		ResponseModalities:       modalities,
+		MediaResolution:          genai.MediaResolutionMedium,
+		InputAudioTranscription:  &genai.AudioTranscriptionConfig{},
+		OutputAudioTranscription: &genai.AudioTranscriptionConfig{},
 		ContextWindowCompression: &genai.ContextWindowCompressionConfig{
 			TriggerTokens: ptr(int64(104857)),
 			SlidingWindow: &genai.SlidingWindow{
 				TargetTokens: ptr(int64(52428)),
 			},
 		},
+		ThinkingConfig: &genai.ThinkingConfig{
+			ThinkingLevel: genai.ThinkingLevelMedium,
+		},
 		RealtimeInputConfig: &genai.RealtimeInputConfig{
-			AutomaticActivityDetection: &genai.AutomaticActivityDetection{
-				SilenceDurationMs: ptr(int32(50)),
-			},
 			ActivityHandling: genai.ActivityHandlingNoInterruption,
 			TurnCoverage:     genai.TurnCoverageTurnIncludesAllInput,
 		},
@@ -270,25 +274,27 @@ func (m *TranslationManager) runSession(s *TranslationSession) {
 						return genai.NewPartFromText(`You are a professional real-time transcriber. 
 Your task: Transcribe the incoming English audio stream and repeat it.
 
-Rules:
-1. Output transcription for every word heard.
-2. The sermon is from a reformed baptist tradition in Amsterdam; use appropriate theological terminology.
-3. DO NOT WAIT FOR PAUSES.
-4. Continuously output without waiting for a pause. I want lower latency between input and output.
-5. Stream word by word, token by token, as you hear it.`)
+1. Transcribe EVERY single word you hear. 
+2. Do NOT skip any sentences, even if they seem repetitive or out of context.
+3. Maintain 100% fidelity. Include filler words, stutters, and all spoken content.
+4. If you are unsure, transcribe your best guess. NEVER stay silent while audio is playing.
+5. DO NOT WAIT FOR PAUSES.
+6. Continuously output without waiting for a pause. I want lower latency between input and output.
+7. Stream word by word, token by token, as you hear it.`)
 					}
 					return genai.NewPartFromText(fmt.Sprintf(`You are a professional real-time translator. 
 Your task: Translate the incoming English audio stream into %s.
 
 Rules:
-1. Output ONLY the %s translation audio/text.
-2. The sermon is from a reformed baptist tradition in Amsterdam; use appropriate theological terminology in %s.
-3. DO NOT WAIT FOR PAUSES.
-4. Avoid complex and less used words in the language.
-5. For languages which take more time to convey the same meaning, speak faster.
-6. Continuously output without waiting for a pause. I want lower latency between input and output.
-7. Stream word by word, token by token, as you hear it.
-`, displayLang, displayLang, displayLang))
+1. Translate EVERY single sentence you hear. 
+2. Do NOT skip any content, even if it seems repetitive.
+3. The sermon is from a reformed baptist tradition in Amsterdam; use appropriate theological terminology in %s.
+4. DO NOT WAIT FOR PAUSES.
+5. Avoid complex and less used words in the language.
+6. For languages which take more time to convey the same meaning, speak faster.
+7. Continuously output without waiting for a pause. I want lower latency between input and output.
+8. Stream word by word, token by token, as you hear it.
+`, displayLang, displayLang))
 				}(),
 			},
 		},
@@ -336,13 +342,11 @@ Rules:
 				if it := resp.ServerContent.InputTranscription; it != nil && it.Text != "" {
 					log.Printf("[GEMINI] Session %s <- InputTranscription: %s", s.Language, it.Text)
 					s.lastResponse = time.Now()
-					s.isStalled = false
 				}
 				if ot := resp.ServerContent.OutputTranscription; ot != nil && ot.Text != "" {
 					log.Printf("[GEMINI] Session %s -> OutputTranscription: %s", s.Language, ot.Text)
 					m.broadcastSubtitle(s.Language, ot.Text, 0)
 					s.lastResponse = time.Now()
-					s.isStalled = false
 				}
 				if resp.ServerContent.TurnComplete {
 					log.Printf("[GEMINI] Session %s turn complete", s.Language)
@@ -368,10 +372,14 @@ Rules:
 	}()
 
 	// Send loop
-	lastSend := time.Now()
-	var totalSentBytes int64
-	var sendCount int
-	var totalPushes int
+	// Send initial activity start since AAD is disabled
+	err = liveSession.SendRealtimeInput(genai.LiveRealtimeInput{
+		ActivityStart: &genai.ActivityStart{},
+	})
+	if err != nil {
+		log.Printf("[GEMINI] Failed to send activity start for %s: %v", s.Language, err)
+	}
+
 Loop:
 	for {
 		select {
@@ -387,30 +395,6 @@ Loop:
 				log.Printf("[GEMINI] Session %s send error: %v", s.Language, err)
 				break Loop
 			}
-			sendCount++
-			totalPushes++
-			totalSentBytes += int64(len(data))
-			
-			// Simple stall detection: if we sent data but no response for 30s
-			if time.Since(s.lastResponse) > 30*time.Second {
-				s.isStalled = true
-			}
-			if time.Since(lastSend) > 5*time.Second {
-				// Calculate peak for this chunk to see if it's silence
-				var maxVal int16
-				for i := 0; i < len(data); i += 2 {
-					val := int16(data[i]) | int16(data[i+1])<<8
-					if val < 0 {
-						val = -val
-					}
-					if val > maxVal {
-						maxVal = val
-					}
-				}
-				log.Printf("[GEMINI] Session %s: %d pushes in last 5s (Total: %d, %d bytes) (Peak: %d)", s.Language, sendCount, totalPushes, totalSentBytes, maxVal)
-				sendCount = 0
-				lastSend = time.Now()
-			}
 		case <-s.ctx.Done():
 			break Loop
 		case <-receiveLoopCtx.Done():
@@ -425,6 +409,10 @@ Loop:
 
 func (m *TranslationManager) SetEnabled(enabled bool) {
 	m.Enabled.Store(enabled)
+}
+
+func (m *TranslationManager) SetOnStateChange(fn func()) {
+	m.OnStateChange = fn
 }
 
 func (m *TranslationManager) broadcastSubtitle(language string, text string, tokens int) {
@@ -453,11 +441,11 @@ func (m *TranslationManager) PushAudio(chunk []float32) {
 		return
 	}
 
-	// Downsample 48kHz to 16kHz (take 1 of every 3 pairs)
+	// Downsample 48kHz to 16kHz (average 3 frames of stereo)
 	downsampled := make([]int16, 0, len(chunk)/6)
 	for i := 0; i < len(chunk)-5; i += 6 {
-		// Average L and R for one sample
-		avg := (chunk[i] + chunk[i+1]) / 2.0
+		// Average all 6 samples in the 3-frame window (L+R for 3 frames)
+		avg := (chunk[i] + chunk[i+1] + chunk[i+2] + chunk[i+3] + chunk[i+4] + chunk[i+5]) / 6.0
 
 		// Clamp to prevent overflow
 		if avg > 1.0 {
@@ -484,16 +472,17 @@ func (m *TranslationManager) PushAudio(chunk []float32) {
 
 	m.subscribers.Range(func(key, value interface{}) bool {
 		lang := key.(string)
-		if sVal, ok := m.sessions.Load(lang); !ok {
-			// Session is dead but has subscribers - restart it
-			log.Printf("[GEMINI] Watchdog: Restarting dead session for %s", lang)
-			m.GetChannels(lang, true)
-		} else {
-			s := sVal.(*TranslationSession)
-			if s.isStalled {
-				log.Printf("[GEMINI] Watchdog: Session %s stalled (no response > 30s), restarting", lang)
-				s.cancel() // This will trigger deletion and next PushAudio will restart it
+		if _, ok := m.sessions.Load(lang); !ok {
+			// Session is dead but has subscribers - restart it with a cooldown
+			now := time.Now()
+			if last, ok := m.lastRestart.Load(lang); ok {
+				if now.Sub(last.(time.Time)) < 5*time.Second {
+					return true // Skip restart, too soon
+				}
 			}
+			log.Printf("[GEMINI] Watchdog: Restarting dead session for %s", lang)
+			m.lastRestart.Store(lang, now)
+			m.GetChannels(lang, true)
 		}
 		return true
 	})

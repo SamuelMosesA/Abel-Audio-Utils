@@ -27,6 +27,7 @@ type Translator interface {
 	ListSessions() []SessionInfo
 	StopSession(language string, subtitles bool)
 	SetEnabled(enabled bool)
+	SetOnStateChange(fn func())
 }
 
 // WSClient wraps a websocket connection with a mutex for thread-safe writes.
@@ -110,10 +111,10 @@ func (s *AppState) Config() InterfaceConfig {
 	return s.config.interfaceCfg
 }
 
-func (s *AppState) Gemini() GeminiConfig {
+func (s *AppState) AI() AIConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.config.geminiCfg
+	return s.config.aiCfg
 }
 
 func (s *AppState) IsRecording() bool {

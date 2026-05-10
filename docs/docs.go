@@ -75,7 +75,7 @@ const docTemplate = `{
                         "BasicAuth": []
                     }
                 ],
-                "description": "Toggles master gemini switch or stops a specific language translation",
+                "description": "Toggles master AI switch or stops a specific language translation",
                 "consumes": [
                     "application/json"
                 ],

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -144,12 +143,9 @@ func StreamHandler(appState *state.AppState, cfg *config.Config) gin.HandlerFunc
 		var ch chan []float32
 		isTranslated := false
 		
-		resolvedLang := cfg.ResolveLanguageName(lang)
-		lowerResolved := strings.ToLower(resolvedLang)
-		originalLang := strings.ToLower(cfg.AIOriginalLanguage)
-
-		if lang != "default" && lowerResolved != originalLang && appState.Translator != nil {
-			ch = appState.Translator.GetChannel(resolvedLang)
+		// Use ISO codes for AI stream lookup
+		if lang != "default" && lang != cfg.AIOriginalLanguage && appState.Translator != nil {
+			ch = appState.Translator.GetChannel(lang)
 			if ch != nil {
 				isTranslated = true
 			}
@@ -162,7 +158,7 @@ func StreamHandler(appState *state.AppState, cfg *config.Config) gin.HandlerFunc
 			defer appState.StreamChannels.Delete(ch)
 		}
 
-		fmt.Printf("[STREAM] New listener connected: %s (lang: %s, resolved: %s, translated: %v)\n", c.Request.RemoteAddr, lang, resolvedLang, isTranslated)
+		fmt.Printf("[STREAM] New listener connected: %s (lang: %s, translated: %v)\n", c.Request.RemoteAddr, lang, isTranslated)
 		defer fmt.Printf("[STREAM] Listener disconnected: %s (lang: %s)\n", c.Request.RemoteAddr, lang)
 
 		// Write PCM data

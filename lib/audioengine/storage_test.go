@@ -25,7 +25,7 @@ func TestWriteAudio(t *testing.T) {
 	// -0.5 * 32767 = -16383.5 -> -16383
 	// 1.0 * 32767 = 32767
 	// -1.0 * 32767 = -32767
-	
+
 	expected := []int16{16383, -16383, 32767, -32767, 0, 0}
 	actual := make([]int16, 6)
 	err = binary.Read(buf, binary.LittleEndian, &actual)
@@ -40,7 +40,8 @@ func TestWritePlaceholderHeader(t *testing.T) {
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	WritePlaceholderHeader(f)
+	err = WritePlaceholderHeader(f, 2, 44100)
+	assert.NoError(t, err)
 
 	// Seek back and check size
 	info, err := f.Stat()
@@ -50,9 +51,16 @@ func TestWritePlaceholderHeader(t *testing.T) {
 	data := make([]byte, 44)
 	f.Seek(0, 0)
 	f.Read(data)
-	for _, b := range data {
-		assert.Equal(t, byte(0), b)
-	}
+	assert.Equal(t, "RIFF", string(data[0:4]))
+	assert.Equal(t, uint32(36), binary.LittleEndian.Uint32(data[4:8]))
+	assert.Equal(t, "WAVE", string(data[8:12]))
+	assert.Equal(t, "fmt ", string(data[12:16]))
+	assert.Equal(t, uint16(1), binary.LittleEndian.Uint16(data[20:22]))
+	assert.Equal(t, uint16(2), binary.LittleEndian.Uint16(data[22:24]))
+	assert.Equal(t, uint32(44100), binary.LittleEndian.Uint32(data[24:28]))
+	assert.Equal(t, uint16(16), binary.LittleEndian.Uint16(data[34:36]))
+	assert.Equal(t, "data", string(data[36:40]))
+	assert.Equal(t, uint32(0), binary.LittleEndian.Uint32(data[40:44]))
 }
 
 func TestFinalizeWavHeader(t *testing.T) {
@@ -64,8 +72,9 @@ func TestFinalizeWavHeader(t *testing.T) {
 	f.Write(make([]byte, 44))
 	f.Write([]byte{0x01, 0x00, 0x01, 0x00, 0x02, 0x00, 0x02, 0x00}) // 2 stereo samples (int16)
 
-	FinalizeWavHeader(f, 2, 2, 48000)
-	// FinalizeWavHeader closes the file
+	err = FinalizeWavHeader(f, 2, 2, 48000)
+	assert.NoError(t, err)
+	assert.NoError(t, f.Close())
 
 	f2, err := os.Open(f.Name())
 	assert.NoError(t, err)
@@ -116,9 +125,8 @@ func TestStartStorageWorker(t *testing.T) {
 
 	recordChan <- chunk
 	time.Sleep(100 * time.Millisecond)
-	
+
 	assert.Equal(t, int64(1), appState.Engine().SamplesWrote()) // Should not have increased
 
 	close(recordChan)
 }
-

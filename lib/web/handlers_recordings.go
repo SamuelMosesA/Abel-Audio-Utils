@@ -1,8 +1,8 @@
 package web
 
 import (
-	"behringerRecorder/lib/config"
 	"behringerRecorder/lib/audioengine"
+	"behringerRecorder/lib/config"
 	"behringerRecorder/lib/state"
 	"fmt"
 	"io"
@@ -63,7 +63,11 @@ func CreateRecording(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 					err = errCreate
 					return
 				}
-				audioengine.WritePlaceholderHeader(file)
+				if errHeader := audioengine.WritePlaceholderHeader(file, 2, cfg.SampleRate); errHeader != nil {
+					file.Close()
+					err = errHeader
+					return
+				}
 
 				appState.Engine().SetFile(file)
 				appState.Engine().ResetSamples()
@@ -82,7 +86,7 @@ func CreateRecording(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 					err = fmt.Errorf("not currently recording")
 					return
 				}
-				
+
 				file := appState.Engine().File()
 				appState.Engine().SetFile(nil)
 				samplesWrote := appState.Engine().SamplesWrote()
@@ -93,8 +97,15 @@ func CreateRecording(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 				}
 
 				filename := filepath.Base(file.Name())
-				audioengine.FinalizeWavHeader(file, 2, samplesWrote, cfg.SampleRate)
-				file.Close()
+				if errFinalize := audioengine.FinalizeWavHeader(file, 2, samplesWrote, cfg.SampleRate); errFinalize != nil {
+					file.Close()
+					err = errFinalize
+					return
+				}
+				if errClose := file.Close(); errClose != nil {
+					err = errClose
+					return
+				}
 
 				s.SetRecording(false)
 				fmt.Printf("[RECORDING] STOP - File: %s, Samples: %d\n", filename, samplesWrote)

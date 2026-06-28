@@ -2,7 +2,7 @@
     "swagger": "2.0",
     "info": {
         "description": "REST API for controlling audio interfaces, recording, and Gemini models.",
-        "title": "Behringer Audio Recorder API",
+        "title": "Abel API",
         "contact": {},
         "version": "1.0"
     },
@@ -393,7 +393,7 @@
         },
         "CookieAuth": {
             "type": "apiKey",
-            "name": "behringer_session",
+            "name": "abel_session",
             "in": "cookie"
         }
     }

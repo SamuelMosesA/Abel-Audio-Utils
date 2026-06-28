@@ -1,9 +1,6 @@
-# Behringer Audio Recorder
+# Abel
 
-A high-performance web-based audio recording interface designed for Behringer U-Phoria and similar audio interfaces. Built with Go (backend) and Svelte (frontend).
-
-![Main Dashboard](docs/images/main_dashboard.png)
-![Cloud Push Dialog](docs/images/cloud_push_dialog.png)
+Abel (anti-babel) is a high-performance, web-based audio recording and streaming interface designed for Behringer U-Phoria and similar audio interfaces. Built with Go (backend), SvelteKit (frontend), structured `slog` logging, and OpenTelemetry integrations.
 
 ## Features
 
@@ -13,10 +10,14 @@ A high-performance web-based audio recording interface designed for Behringer U-
 - **File Management**: List, play back, and manage your recordings directly from the browser.
 - **Cloud Integration**: Push recordings to a configured cloud drive location with a click.
 - **Multi-Client Sync**: WebSocket-based state synchronization across multiple open tabs.
+- **AI Live Subtitles & Translation**: Real-time translation and transcription via **Gemini Live API** or **OpenAI Realtime API** with Server-Sent Events (SSE) subtitle delivery.
+- **Centralized Telemetry**: Full OpenTelemetry OTLP integration emitting structured application logs (`slog` log handler) and performance metrics (loop latency, write latency, active/dropped connections, AI token consumption).
+- **Client Error Hook**: Automatic collection of frontend runtime crashes, pushing stack traces back to the server telemetry pipeline.
+- **Production Packaging**: Native macOS Homebrew Tap formula with a background service (`launchd`).
 
 ## Prerequisites
 
-- **Go**: 1.21 or higher
+- **Go**: 1.25 or higher
 - **Node.js & npm**: For building the frontend
 - **PortAudio**: Development headers for audio I/O
   - macOS: `brew install portaudio`
@@ -24,58 +25,65 @@ A high-performance web-based audio recording interface designed for Behringer U-
 
 ## Installation & Setup
 
+### Local Development
+
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
    cd BehringerAudioRecorder
    ```
 
-2. **Build the Application**:
-   Use the provided `Makefile` to build both the frontend and backend:
+2. **Run the Dev Script**:
+   Run the local helper script to package, compile, and start the app using Homebrew:
    ```bash
-   make build
+   ./dev.sh
    ```
-   This will install frontend dependencies, build the Svelte app, and compile the Go binary.
+   This script packages the source code, runs `brew install --build-from-source ./abel.rb`, sets up a config template at `~/.config/abel/config.yaml` if not present, and starts the `abel` server.
 
-3. **Configure**:
-   Edit `config.yaml` to set your desired port, sample rate, and storage locations.
+### macOS Native Installation (Homebrew)
+
+Install via your custom Homebrew Tap:
+```bash
+brew install SamuelMosesA/RemotePortAudioRecorder/abel
+```
+
+Start the application as a background service:
+```bash
+brew services start abel
+```
+Configure it by copying the template config to your user directory:
+```bash
+mkdir -p ~/.config/abel
+cp /opt/homebrew/etc/abel/config.yaml ~/.config/abel/config.yaml
+```
+Then edit `~/.config/abel/config.yaml`.
 
 ## Usage
 
-1. **Run the Server**:
+1. **Start the Observability Stack (Optional)**:
+   Launch Loki, Prometheus, Grafana, and the OTel Collector to view centralized telemetry:
    ```bash
-   ./behringer-recorder
+   docker-compose up -d
    ```
-   Alternatively, use `make run` to build and run in one step.
+   Navigate to Grafana at `http://localhost:3000`.
 
-2. **Access the UI**:
-   Open your browser and navigate to `http://localhost:8080` (or your configured port).
-   For the network port, use the IP address published in the logs
+2. **Run the Server**:
+   ```bash
+   brew services start abel
+   ```
+   The application strictly loads the configuration from your user home directory `~/.config/abel/config.yaml`.
 
-3. **Select Device**:
-   Choose your audio interface from the device list and click **Connect**.
+3. **Access the UI**:
+   Open `http://localhost:8080` (or your configured port).
 
-4. **Record**:
-   Adjust your channels and boost, then hit **Start Recording**. Files are saved as `.wav` in the `recordings` folder.
+## Project Structure
 
-## Configuration (`config.yaml`)
-
-| Key | Description | Default |
-|-----|-------------|---------|
-| `port` | Web server port | `8080` |
-| `sample_rate` | Audio sample rate | `48000` |
-| `buffer_size` | Processing buffer size | `1024` |
-| `default_ch_l` | Default left input channel | `0` |
-| `default_ch_r` | Default right input channel | `1` |
-| `default_boost` | Default digital gain multiplier | `1.0` |
-| `storage_location` | Directory for local recordings | `./recordings` |
-| `cloud_drive_location` | Target for cloud pushes | `./cloud_drive` |
-
-## Development
-
-- Frontend source is in `frontend/` (Vite + Svelte).
-- Backend library code is in `lib/`.
-- Core engine logic is in `lib/portaudio/engine.go`.
+- `src/backend/main.go` - Application entry point with configuration fallback path resolution.
+- `src/backend/lib/` - Go backend modules (AI connectors, web routing, audio recording engine, telemetry handlers).
+- `src/backend/static/` - Built SvelteKit frontend assets embedded in the backend binary.
+- `src/frontend/` - SvelteKit source code.
+- `config/` - Local configuration files.
+- `observability/` - OpenTelemetry Collector, Prometheus, and Grafana service configurations.
 
 ## License
 

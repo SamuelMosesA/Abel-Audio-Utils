@@ -13,7 +13,7 @@ host: localhost:8080
 info:
   contact: {}
   description: REST API for controlling audio interfaces, recording, and Gemini models.
-  title: Behringer Audio Recorder API
+  title: Abel API
   version: "1.0"
 paths:
   /api/ai/config:
@@ -249,6 +249,6 @@ securityDefinitions:
     type: basic
   CookieAuth:
     in: cookie
-    name: behringer_session
+    name: abel_session
     type: apiKey
 swagger: "2.0"

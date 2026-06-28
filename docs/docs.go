@@ -399,7 +399,7 @@ const docTemplate = `{
         },
         "CookieAuth": {
             "type": "apiKey",
-            "name": "behringer_session",
+            "name": "abel_session",
             "in": "cookie"
         }
     }
@@ -411,7 +411,7 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "localhost:8080",
 	BasePath:         "/",
 	Schemes:          []string{},
-	Title:            "Behringer Audio Recorder API",
+	Title:            "Abel API",
 	Description:      "REST API for controlling audio interfaces, recording, and Gemini models.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,

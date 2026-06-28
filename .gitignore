@@ -1,8 +1,2 @@
-/recordings/
-/cloud_drive/
-/static/
-/behringer-recorder
-/config.yaml
-/frontend/.svelte-kit/generated/
-/frontend/.svelte-kit/output/
-coverage.out
+/src/backend/static/
+/coverage.out

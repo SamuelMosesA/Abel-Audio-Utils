@@ -45,7 +45,7 @@ Abel (anti-babel) is a high-performance, web-based audio recording, AI translati
 Install via your custom Homebrew Tap:
 ```bash
 brew tap SamuelMosesA/Abel-Audio-Utils
-brew install abel
+brew install SamuelMosesA/Abel-Audio-Utils/abel
 ```
 
 Start the application as a background service:

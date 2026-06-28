@@ -2,9 +2,9 @@ require "digest"
 
 class Abel < Formula
   desc "Abel - Audio Recorder with AI Transcription and Translation"
-  homepage "https://gitlab.com/SamuelMosesA/RemotePortAudioRecorder"
-  url "https://gitlab.com/SamuelMosesA/RemotePortAudioRecorder.git", tag: "v0.1.0"
-  head "https://gitlab.com/SamuelMosesA/RemotePortAudioRecorder.git", branch: "main"
+  homepage "https://github.com/SamuelMosesA/Abel-Audio-Utils"
+  url "https://github.com/SamuelMosesA/Abel-Audio-Utils.git", tag: "v0.1.0"
+  head "https://github.com/SamuelMosesA/Abel-Audio-Utils.git", branch: "main"
 
   depends_on "go" => :build
   depends_on "node" => :build

@@ -1,6 +1,6 @@
 # Abel
 
-Abel (anti-babel) is a high-performance, web-based audio recording and streaming interface designed for Behringer U-Phoria and similar audio interfaces. Built with Go (backend), SvelteKit (frontend), structured `slog` logging, and OpenTelemetry integrations.
+Abel (anti-babel) is a high-performance, web-based audio recording, AI translation & streaming interface designed for professional USB audio interfaces. Built with Go (backend), SvelteKit (frontend), structured `slog` logging, and OpenTelemetry integrations.
 
 ## Features
 
@@ -10,7 +10,7 @@ Abel (anti-babel) is a high-performance, web-based audio recording and streaming
 - **File Management**: List, play back, and manage your recordings directly from the browser.
 - **Cloud Integration**: Push recordings to a configured cloud drive location with a click.
 - **Multi-Client Sync**: WebSocket-based state synchronization across multiple open tabs.
-- **AI Live Subtitles & Translation**: Real-time translation and transcription via **Gemini Live API** or **OpenAI Realtime API** with Server-Sent Events (SSE) subtitle delivery.
+- **AI Live Subtitles & Translation**: Real-time translation and transcription via **OpenAI Realtime API** with Server-Sent Events (SSE) subtitle delivery.
 - **Centralized Telemetry**: Full OpenTelemetry OTLP integration emitting structured application logs (`slog` log handler) and performance metrics (loop latency, write latency, active/dropped connections, AI token consumption).
 - **Client Error Hook**: Automatic collection of frontend runtime crashes, pushing stack traces back to the server telemetry pipeline.
 - **Production Packaging**: Native macOS Homebrew Tap formula with a background service (`launchd`).
@@ -29,8 +29,8 @@ Abel (anti-babel) is a high-performance, web-based audio recording and streaming
 
 1. **Clone the repository**:
    ```bash
-   git clone <repository-url>
-   cd BehringerAudioRecorder
+   git clone https://github.com/SamuelMosesA/Abel-Audio-Utils.git
+   cd Abel-Audio-Utils
    ```
 
 2. **Run the Dev Script**:
@@ -40,11 +40,12 @@ Abel (anti-babel) is a high-performance, web-based audio recording and streaming
    ```
    This script packages the source code, runs `brew install --build-from-source ./abel.rb`, sets up a config template at `~/.config/abel/config.yaml` if not present, and starts the `abel` server.
 
-### macOS Native Installation (Homebrew)
+### Native Installation (Homebrew)
 
 Install via your custom Homebrew Tap:
 ```bash
-brew install SamuelMosesA/RemotePortAudioRecorder/abel
+brew tap SamuelMosesA/Abel-Audio-Utils
+brew install abel
 ```
 
 Start the application as a background service:

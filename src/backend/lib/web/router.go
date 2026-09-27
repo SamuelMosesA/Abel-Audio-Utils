@@ -1,6 +1,7 @@
 package web
 
 import (
+	"abel/src/backend/lib/audioengine"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
 	"embed"
@@ -17,7 +18,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-func NewRouter(appState *state.AppState, cfg *config.Config, staticFiles embed.FS) *gin.Engine {
+func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audioengine.HLSPublisher, staticFiles embed.FS) *gin.Engine {
 	// Switch from default to release mode by default, standard logger in gin is noisy
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -108,8 +109,10 @@ func NewRouter(appState *state.AppState, cfg *config.Config, staticFiles embed.F
 		{
 			audio.GET("/devices", DevicesHandler(appState))
 			audio.GET("/config", GetAudioConfig(appState))
-			audio.GET("/stream", StreamHandler(appState, cfg))
-			audio.GET("/stream/*lang", StreamHandler(appState, cfg))
+			audio.GET("/stream", StreamHandler())
+			audio.GET("/stream/*lang", StreamHandler())
+			audio.GET("/hls/:lang/index.m3u8", HLSPlaylistHandler(appState, cfg, hlsPublisher))
+			audio.GET("/hls/:lang/:segment", HLSSegmentHandler(hlsPublisher))
 		}
 
 		// Recordings

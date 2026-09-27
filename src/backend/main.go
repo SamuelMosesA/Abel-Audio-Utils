@@ -1,12 +1,12 @@
 package main
 
 import (
+	"abel/src/backend/lib/audioengine"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/openai"
-	"abel/src/backend/lib/audioengine"
 	"abel/src/backend/lib/state"
-	"abel/src/backend/lib/web"
 	"abel/src/backend/lib/telemetry"
+	"abel/src/backend/lib/web"
 	"context"
 	"embed"
 	"log/slog"
@@ -77,7 +77,7 @@ func main() {
 	defer pa.Terminate()
 
 	appState := state.NewAppState(cfg.StorageLocation, cfg.CloudDriveLocation)
-	
+
 	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
 		s.SetChL(int32(cfg.DefaultChL))
 		s.SetChR(int32(cfg.DefaultChR))
@@ -113,10 +113,17 @@ func main() {
 	}
 
 	// Start workers
-	audioengine.StartAudioBroadcaster(appState, cfg, appState.PlaybackChan)
+	hlsPublisher, err := audioengine.NewHLSPublisher()
+	if err != nil {
+		logger.Error("Safari-compatible HLS streaming unavailable", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer hlsPublisher.Close()
+
+	audioengine.StartAudioBroadcaster(appState, cfg, appState.PlaybackChan, hlsPublisher)
 	audioengine.StartStorageWorker(appState, appState.RecordChan)
 
-	r := web.NewRouter(appState, cfg, staticFiles)
+	r := web.NewRouter(appState, cfg, hlsPublisher, staticFiles)
 
 	logger.Info("Web UI active", slog.String("url", "http://"+web.GetLocalIP()+":"+cfg.Port))
 	if err := r.Run("0.0.0.0:" + cfg.Port); err != nil {

@@ -5,6 +5,7 @@ import (
 	"abel/src/backend/lib/state"
 	"abel/src/backend/lib/telemetry"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -12,30 +13,72 @@ import (
 	pa "github.com/gordonklaus/portaudio"
 )
 
+// engineStopTimeout bounds how long we wait for the engine goroutine to close its stream.
+const engineStopTimeout = 2 * time.Second
+
+var ErrEngineStopTimeout = errors.New("audio engine did not stop in time")
+
+// StartAudioEngine stops any running engine and starts capturing from deviceID.
+// It waits for the previous engine to exit, so it must not be called while holding the AppState lock.
 func StartAudioEngine(streamer AudioStreamer, appState *state.AppState, cfg *config.Config, deviceID int, recordChan chan<- []float32, playbackChan chan<- []float32) error {
+	appState.EngineLifecycle.Lock()
+	defer appState.EngineLifecycle.Unlock()
+	return startAudioEngineLocked(streamer, appState, cfg, deviceID, recordChan, playbackChan)
+}
+
+// StopAudioEngine signals the engine to quit and waits until it has closed its stream.
+func StopAudioEngine(appState *state.AppState) error {
+	appState.EngineLifecycle.Lock()
+	defer appState.EngineLifecycle.Unlock()
+	return stopAudioEngineLocked(appState)
+}
+
+func stopAudioEngineLocked(appState *state.AppState) error {
+	q := appState.QuitAudio
+	if q == nil {
+		return nil
+	}
+	close(q)
+	appState.QuitAudio = nil
+
+	done := appState.EngineDone
+	appState.EngineDone = nil
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-time.After(engineStopTimeout):
+		return ErrEngineStopTimeout
+	}
+}
+
+func startAudioEngineLocked(streamer AudioStreamer, appState *state.AppState, cfg *config.Config, deviceID int, recordChan chan<- []float32, playbackChan chan<- []float32) error {
 	if streamer == nil {
 		streamer = &PADriver{}
 	}
 
-	if q := appState.QuitAudio; q != nil {
-		close(q)
-		appState.QuitAudio = nil
-		time.Sleep(100 * time.Millisecond)
-	}
-	quit := make(chan bool)
-	appState.QuitAudio = quit
-	appState.Engine().SetRunning(true)
-
-	devices := appState.Devices
-
-	if deviceID >= len(devices) {
+	devices := appState.Devices()
+	if deviceID < 0 || deviceID >= len(devices) {
 		return fmt.Errorf("invalid device")
 	}
 	dev := devices[deviceID]
 
+	if err := stopAudioEngineLocked(appState); err != nil {
+		return err
+	}
+	quit := make(chan bool)
+	done := make(chan struct{})
+	appState.QuitAudio = quit
+	appState.EngineDone = done
+	appState.Engine().SetRunning(true)
+
 	// Engine GoRoutine
 	logger := slog.With("component", "audio")
 	go func() {
+		// Registered first so it runs last, after the stream is stopped and closed.
+		defer close(done)
 		logger.Info("Audio engine started", slog.String("device", dev.Name))
 		defer logger.Info("Audio engine stopped")
 		defer func() { appState.Engine().SetRunning(false) }()

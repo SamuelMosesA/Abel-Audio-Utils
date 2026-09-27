@@ -10,6 +10,10 @@ import (
 )
 
 func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
+	return setupTestRouterWithRestarter(stateObj, cfg, nil)
+}
+
+func setupTestRouterWithRestarter(stateObj *state.AppState, cfg *config.Config, restarter EngineRestarter) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
 	store := cookie.NewStore([]byte("secret"))
@@ -30,7 +34,7 @@ func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
 	api := r.Group("/api")
 	{
 		api.POST("/auth/session", LoginHandler(cfg, stateObj))
-		RegisterAdminRoutes(api, stateObj, cfg)
+		RegisterAdminRoutes(api, stateObj, cfg, restarter)
 		api.GET("/recordings", GetRecordingStatus(stateObj))
 		api.GET("/ai/streams", GetAIStreamsStatus(stateObj))
 		api.GET("/system/connection", GetSystemConnection(cfg))

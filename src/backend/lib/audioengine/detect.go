@@ -10,8 +10,19 @@ type AudioDevice struct {
 	In   int    `json:"inputs"`
 }
 
+// InputDevices keeps only the devices that can capture audio.
+func InputDevices(all []*pa.DeviceInfo) []*pa.DeviceInfo {
+	var inputs []*pa.DeviceInfo
+	for _, d := range all {
+		if d.MaxInputChannels > 0 {
+			inputs = append(inputs, d)
+		}
+	}
+	return inputs
+}
+
 func GetDevices(devices []*pa.DeviceInfo) []AudioDevice {
-	var list []AudioDevice
+	list := []AudioDevice{}
 	for i, d := range devices {
 		if d.MaxInputChannels > 0 {
 			list = append(list, AudioDevice{

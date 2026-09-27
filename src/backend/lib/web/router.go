@@ -18,7 +18,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audioengine.HLSPublisher, staticFiles embed.FS) *gin.Engine {
+func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audioengine.HLSPublisher, restarter EngineRestarter, staticFiles embed.FS) *gin.Engine {
 	// Switch from default to release mode by default, standard logger in gin is noisy
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -141,7 +141,7 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 		api.POST("/telemetry/errors", ErrorLogHandler())
 
 		// Admin/Protected routes (session authenticated)
-		RegisterAdminRoutes(api, appState, cfg)
+		RegisterAdminRoutes(api, appState, cfg, restarter)
 	}
 
 	r.GET("/ws", NewWSHandler(appState, cfg))
@@ -149,13 +149,14 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 	return r
 }
 
-func RegisterAdminRoutes(r *gin.RouterGroup, appState *state.AppState, cfg *config.Config) {
+func RegisterAdminRoutes(r *gin.RouterGroup, appState *state.AppState, cfg *config.Config, restarter EngineRestarter) {
 	r.Use(SessionAuthMiddleware())
 	{
 		r.PATCH("/audio/config", UpdateAudioConfig(appState, cfg))
 		r.POST("/recordings", CreateRecording(appState, cfg))
 		r.POST("/ai/streams", UpdateAIStreams(appState, cfg))
 		r.GET("/system/changelog", ChangeLogHandler(appState))
+		r.POST("/system/restart", RestartEngineHandler(restarter))
 		r.GET("/recordings/files", ListRecordingFiles(cfg))
 		r.POST("/recordings/push", PushRecordingToCloud(cfg))
 		r.StaticFS("/recordings/raw", http.Dir(cfg.StorageLocation))

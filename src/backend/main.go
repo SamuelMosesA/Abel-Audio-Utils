@@ -106,11 +106,7 @@ func main() {
 	}
 
 	allDevices, _ := pa.Devices()
-	for _, d := range allDevices {
-		if d.MaxInputChannels > 0 {
-			appState.Devices = append(appState.Devices, d)
-		}
-	}
+	appState.SetDevices(audioengine.InputDevices(allDevices))
 
 	// Start workers
 	hlsPublisher, err := audioengine.NewHLSPublisher()
@@ -123,7 +119,8 @@ func main() {
 	audioengine.StartAudioBroadcaster(appState, cfg, appState.PlaybackChan, hlsPublisher)
 	audioengine.StartStorageWorker(appState, appState.RecordChan)
 
-	r := web.NewRouter(appState, cfg, hlsPublisher, staticFiles)
+	restarter := audioengine.NewRestarter(appState, cfg, resolvedPath)
+	r := web.NewRouter(appState, cfg, hlsPublisher, restarter, staticFiles)
 
 	logger.Info("Web UI active", slog.String("url", "http://"+web.GetLocalIP()+":"+cfg.Port))
 	if err := r.Run("0.0.0.0:" + cfg.Port); err != nil {

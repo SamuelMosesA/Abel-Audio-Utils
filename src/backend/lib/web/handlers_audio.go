@@ -20,8 +20,7 @@ func DevicesHandler(state *state.AppState) gin.HandlerFunc {
 	logger := slog.With("component", "api")
 	return func(c *gin.Context) {
 		logger.Info("Device list requested")
-		devices := state.Devices
-		list := audioengine.GetDevices(devices)
+		list := audioengine.GetDevices(state.Devices())
 		c.JSON(http.StatusOK, list)
 	}
 }
@@ -58,20 +57,26 @@ func UpdateAudioConfig(appState *state.AppState, cfg *config.Config) gin.Handler
 			return
 		}
 
+		// Start the engine outside state.Update: StartAudioEngine waits for the previous
+		// engine goroutine to exit, and that goroutine needs the state lock to do so.
+		var engineErr error
+		if req.DeviceID != nil {
+			engineErr = audioengine.StartAudioEngine(nil, appState, cfg, *req.DeviceID, appState.RecordChan, appState.PlaybackChan)
+			if engineErr != nil {
+				logger.Error("Error starting audio engine",
+					slog.Any("audio.error", engineErr),
+				)
+			} else {
+				logger.Info("Audio engine started",
+					slog.Int("audio.device_id", *req.DeviceID),
+				)
+			}
+		}
+
 		state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
-			if req.DeviceID != nil {
-				err := audioengine.StartAudioEngine(nil, appState, cfg, *req.DeviceID, appState.RecordChan, appState.PlaybackChan)
-				if err != nil {
-					logger.Error("Error starting audio engine",
-						slog.Any("audio.error", err),
-					)
-				} else {
-					s.SetIsRunning(true)
-					s.SetDeviceID(int32(*req.DeviceID))
-					logger.Info("Audio engine started",
-						slog.Int("audio.device_id", *req.DeviceID),
-					)
-				}
+			if req.DeviceID != nil && engineErr == nil {
+				s.SetIsRunning(true)
+				s.SetDeviceID(int32(*req.DeviceID))
 			}
 
 			if req.ChL != nil {

@@ -7,6 +7,7 @@
     import MeterPanel from "./MeterPanel.svelte";
     import RecordingList from "./RecordingList.svelte";
     import TranslationAdmin from "./TranslationAdmin.svelte";
+    import RestartEngineButton from "./RestartEngineButton.svelte";
     import {
         Play,
         Square,
@@ -43,6 +44,14 @@
     const handleApplySettings = async () => {
         const id = selectedDeviceValue !== "" ? Number(selectedDeviceValue) : null;
         await audio.commitConfig(id);
+    };
+
+    const handleRestartEngine = async () => {
+        if (!confirm("Restarting the engine briefly interrupts live audio and translation for all listeners. Continue?")) {
+            return;
+        }
+        const { message } = await audio.restartEngine();
+        ui.showNotification(message, "engine");
     };
 </script>
 
@@ -90,7 +99,7 @@
                         <Button 
                             class="h-28 flex flex-col gap-2 font-black text-lg" 
                             onclick={async () => { if (!audio.isRecording) { await audio.toggleRecording(); await files.fetchFiles(); } }}
-                            disabled={audio.isRecording}
+                            disabled={audio.isRecording || audio.isRestarting}
                         >
                             <Play class="w-8 h-8 fill-current" />
                             START
@@ -129,6 +138,12 @@
 
         <!-- Audio Engine Config & Recordings (Second on mobile) -->
         <div class="lg:col-span-2 space-y-8 lg:order-1">
+            <RestartEngineButton
+                isRecording={audio.isRecording}
+                isRestarting={audio.isRestarting}
+                onrestart={handleRestartEngine}
+            />
+
             <Card title="Audio Engine Configuration">
                 <div class="space-y-6">
                     <div class="space-y-2">

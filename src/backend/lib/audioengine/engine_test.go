@@ -42,7 +42,7 @@ func TestEngineAudioProcessing(t *testing.T) {
 		s.SetChR(1)
 		s.SetBoost(1.0)
 	})
-	appState.Devices = []*pa.DeviceInfo{{Name: "Test", MaxInputChannels: 2}}
+	appState.SetDevices([]*pa.DeviceInfo{{Name: "Test", MaxInputChannels: 2}})
 	cfg := &config.Config{BufferSize: 2, SampleRate: 44100}
 	
 	recordChan := make(chan []float32, 1)
@@ -80,5 +80,33 @@ func TestEngineAudioProcessing(t *testing.T) {
 	// Close engine
 	close(appState.QuitAudio)
 	time.Sleep(100 * time.Millisecond)
+}
+
+func TestStartAudioEngineRejectsInvalidDevice(t *testing.T) {
+	appState := state.NewAppState("", "")
+	appState.SetDevices([]*pa.DeviceInfo{{Name: "Test", MaxInputChannels: 2}})
+	cfg := &config.Config{BufferSize: 2, SampleRate: 44100}
+
+	for _, id := range []int{-1, 1, 99} {
+		err := StartAudioEngine(&MockStreamer{}, appState, cfg, id, appState.RecordChan, appState.PlaybackChan)
+		assert.Error(t, err, "device %d", id)
+		assert.False(t, appState.Engine().IsRunning(), "device %d must not mark the engine running", id)
+		assert.Nil(t, appState.QuitAudio, "device %d must not start an engine", id)
+	}
+}
+
+func TestStopAudioEngineWaitsForStreamClose(t *testing.T) {
+	appState := state.NewAppState("", "")
+	appState.SetDevices([]*pa.DeviceInfo{{Name: "Test", MaxInputChannels: 2}})
+	cfg := &config.Config{BufferSize: 2, SampleRate: 44100}
+	streamer := &trackingStreamer{}
+
+	assert.NoError(t, StartAudioEngine(streamer, appState, cfg, 0, appState.RecordChan, appState.PlaybackChan))
+	streamer.waitOpened(t, 1)
+	assert.NoError(t, StopAudioEngine(appState))
+
+	assert.True(t, streamer.Last().closed.Load(), "stream closed by the time StopAudioEngine returns")
+	assert.False(t, appState.Engine().IsRunning())
+	assert.NoError(t, StopAudioEngine(appState), "stopping twice is a no-op")
 }
 

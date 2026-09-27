@@ -37,12 +37,7 @@ func LoginHandler(cfg *config.Config, appState *state.AppState) gin.HandlerFunc 
 			req.Username = "admin" // Default if empty
 		}
 
-		authorized := false
-		if p, ok := cfg.Credentials[req.Username]; ok && p == req.Password {
-			authorized = true
-		}
-
-		if !authorized {
+		if !cfg.CheckCredentials(req.Username, req.Password) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
 			return
 		}

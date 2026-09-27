@@ -8,6 +8,7 @@
     import Button from "../ui/Button.svelte";
     import Card from "../ui/Card.svelte";
     import LanguageSelector from "../ai/LanguageSelector.svelte";
+    import LiveAudioPlayer from "../audio/LiveAudioPlayer.svelte";
 
     let { lang = "default" } = $props();
     let subtitleState = $state({ 
@@ -49,7 +50,7 @@
         isProcessingQueue = false;
     }
 
-    let audioSource = $derived(`/api/audio/stream/${lang}`);
+    let audioSource = $derived(`/api/audio/hls/${lang}/index.m3u8`);
     
     let eventSource: EventSource | null = null;
     let scrollContainerRef = $state<HTMLElement | null>(null);
@@ -125,12 +126,10 @@
                     <div class="space-y-4">
                         <span class="text-xxs font-black uppercase tracking-extra text-muted-foreground">Audio Stream</span>
                         {#key audioSource}
-                            <audio 
-                                controls 
-                                autoplay
-                                src={audioSource} 
-                                class="w-full h-10 rounded-lg opacity-80 hover:opacity-100 transition-opacity"
-                            ></audio>
+                            <LiveAudioPlayer
+                                src={audioSource}
+                                label={`Live ${ai.resolveLanguageName(lang)} audio`}
+                            />
                         {/key}
                         <div class="flex items-center gap-2 text-xxs text-muted-foreground/60 font-medium italic">
                             <Waves class="w-3 h-3" />

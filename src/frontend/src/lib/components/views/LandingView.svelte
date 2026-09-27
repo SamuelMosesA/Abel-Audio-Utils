@@ -4,6 +4,7 @@
   import Card from "$lib/components/ui/Card.svelte";
   import Button from "$lib/components/ui/Button.svelte";
   import LanguageSelector from "$lib/components/ai/LanguageSelector.svelte";
+  import LiveAudioPlayer from "$lib/components/audio/LiveAudioPlayer.svelte";
   import { goto } from "$app/navigation";
   import { Globe, ArrowRight, QrCode, Volume2, Waves } from "lucide-svelte";
   import { onMount } from "svelte";
@@ -156,11 +157,10 @@
                   <Waves class="w-3 h-3" />
                   Live Stream
                 </div>
-                <audio 
-                  controls 
-                  src="/api/audio/stream/default" 
-                  class="w-full h-10 rounded-lg opacity-80 hover:opacity-100 transition-opacity"
-                ></audio>
+                <LiveAudioPlayer
+                  src="/api/audio/hls/default/index.m3u8"
+                  label="Original live audio"
+                />
               </div>
             </div>
           </div>

@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUpdateAudioConfig(t *testing.T) {
@@ -31,27 +33,63 @@ func TestUpdateAudioConfig(t *testing.T) {
 	assert.Equal(t, 2.5, appState.Config().Boost())
 }
 
-func TestStreamHandler(t *testing.T) {
-	appState := state.NewAppState("", "")
-	cfg := &config.Config{SampleRate: 48000}
-	router := setupTestRouter(appState, cfg)
+func TestStreamHandlerRedirectsToHLS(t *testing.T) {
+	router := gin.New()
+	router.GET("/api/audio/stream/*lang", StreamHandler())
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	req, _ := http.NewRequestWithContext(ctx, "GET", "/stream", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/audio/stream/fr", nil)
 	w := httptest.NewRecorder()
-	go router.ServeHTTP(w, req)
+	router.ServeHTTP(w, req)
 
-	time.Sleep(100 * time.Millisecond)
-	found := false
-	appState.StreamChannels.Range(func(key, value interface{}) bool {
-		found = true
-		ch := key.(chan []float32)
-		ch <- []float32{0.1, 0.1}
-		return false
-	})
-	assert.True(t, found)
-	time.Sleep(100 * time.Millisecond)
-	cancel()
+	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
+	assert.Equal(t, "/api/audio/hls/fr/index.m3u8", w.Header().Get("Location"))
+}
+
+type stubHLSProvider struct {
+	ensuredLanguage string
+	playlist        []byte
+	segment         []byte
+}
+
+func (s *stubHLSProvider) EnsureStream(language string, sampleRate int, source <-chan []float32) error {
+	s.ensuredLanguage = language
+	return nil
+}
+
+func (s *stubHLSProvider) WaitForPlaylist(ctx context.Context, language string, timeout time.Duration) ([]byte, error) {
+	return s.playlist, nil
+}
+
+func (s *stubHLSProvider) ReadSegment(language, name string) ([]byte, error) {
+	return s.segment, nil
+}
+
+func TestHLSHandlersServeSafariCompatibleContract(t *testing.T) {
+	appState := state.NewAppState("", "")
+	cfg := &config.Config{SampleRate: 48000, AIOriginalLanguage: "en"}
+	provider := &stubHLSProvider{
+		playlist: []byte("#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:1.0,\nsegment-000000001.ts\n"),
+		segment:  []byte{0x47, 0x40, 0x00},
+	}
+	router := gin.New()
+	router.GET("/api/audio/hls/:lang/index.m3u8", HLSPlaylistHandler(appState, cfg, provider))
+	router.GET("/api/audio/hls/:lang/:segment", HLSSegmentHandler(provider))
+
+	playlistRequest := httptest.NewRequest(http.MethodGet, "/api/audio/hls/default/index.m3u8", nil)
+	playlistResponse := httptest.NewRecorder()
+	router.ServeHTTP(playlistResponse, playlistRequest)
+
+	require.Equal(t, http.StatusOK, playlistResponse.Code)
+	assert.Equal(t, "application/vnd.apple.mpegurl", playlistResponse.Header().Get("Content-Type"))
+	assert.Equal(t, "no-store", playlistResponse.Header().Get("Cache-Control"))
+	assert.Contains(t, playlistResponse.Body.String(), "#EXTM3U")
+	assert.Equal(t, "default", provider.ensuredLanguage)
+
+	segmentRequest := httptest.NewRequest(http.MethodGet, "/api/audio/hls/default/segment-000000001.ts", nil)
+	segmentResponse := httptest.NewRecorder()
+	router.ServeHTTP(segmentResponse, segmentRequest)
+
+	require.Equal(t, http.StatusOK, segmentResponse.Code)
+	assert.Equal(t, "video/mp2t", segmentResponse.Header().Get("Content-Type"))
+	assert.Equal(t, provider.segment, segmentResponse.Body.Bytes())
 }

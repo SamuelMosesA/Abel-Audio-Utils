@@ -12,10 +12,120 @@ import (
 	pa "github.com/gordonklaus/portaudio"
 )
 
+// PortAudio hooks, replaced in tests.
+var (
+	reinitPortAudio = func() error {
+		if err := pa.Terminate(); err != nil {
+			return err
+		}
+		return pa.Initialize()
+	}
+	listPortAudioDevices = pa.Devices
+)
+
+// RestartResult is returned to the admin UI after a restart.
+type RestartResult struct {
+	Devices     []AudioDevice `json:"devices"`
+	DeviceID    int           `json:"deviceID"`
+	Reconnected string        `json:"reconnected,omitempty"`
+	ConfigError string        `json:"configError,omitempty"`
+}
+
+// RestartEngine re-scans audio devices so hardware connected after startup appears,
+// reloads config.yaml and the credentials file, and reconnects to the previous device.
+func RestartEngine(streamer AudioStreamer, appState *state.AppState, cfg *config.Config) (RestartResult, error) {
+	// Device IDs are list positions that shift when hardware changes, so remember the name.
+	previous := ""
+	if conf := appState.Config(); conf.IsRunning() && conf.DeviceID() >= 0 && int(conf.DeviceID()) < len(appState.Devices) {
+		previous = appState.Devices[conf.DeviceID()].Name
+	}
+
+	if err := refreshDevices(appState); err != nil {
+		return RestartResult{}, err
+	}
+
+	result := RestartResult{DeviceID: -1}
+	defaultsChanged := false
+	if cfg.Path != "" {
+		// A broken file is reported but keeps the previous config.
+		if fresh, err := config.LoadConfig(cfg.Path); err != nil {
+			result.ConfigError = err.Error()
+		} else {
+			defaultsChanged = fresh.DefaultChL != cfg.DefaultChL || fresh.DefaultChR != cfg.DefaultChR || fresh.DefaultBoost != cfg.DefaultBoost
+			cfg.Credentials = fresh.Credentials
+			cfg.DefaultChL, cfg.DefaultChR, cfg.DefaultBoost = fresh.DefaultChL, fresh.DefaultChR, fresh.DefaultBoost
+		}
+	}
+
+	for i, d := range appState.Devices {
+		if previous != "" && d.Name == previous {
+			if err := StartAudioEngine(streamer, appState, cfg, i, appState.RecordChan, appState.PlaybackChan); err == nil {
+				result.DeviceID, result.Reconnected = i, previous
+			}
+			break
+		}
+	}
+
+	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+		s.SetIsRunning(result.DeviceID >= 0)
+		s.SetDeviceID(int32(result.DeviceID))
+		// Only overwrite live routing/gain when the file's defaults changed,
+		// so values tuned in the admin UI survive a plain device re-scan.
+		if defaultsChanged {
+			s.SetChL(int32(cfg.DefaultChL))
+			s.SetChR(int32(cfg.DefaultChR))
+			s.SetBoost(cfg.DefaultBoost)
+		}
+	})
+
+	result.Devices = GetDevices(appState.Devices)
+	return result, nil
+}
+
+// refreshDevices stops the engine and re-initializes PortAudio, which only
+// enumerates devices in Initialize.
+func refreshDevices(appState *state.AppState) error {
+	if q := appState.QuitAudio; q != nil {
+		close(q)
+		appState.QuitAudio = nil
+	}
+	// The engine goroutine clears the running flag only after closing its stream,
+	// and PortAudio must not be terminated while a stream is open.
+	deadline := time.Now().Add(2 * time.Second)
+	for appState.Engine().IsRunning() {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("audio engine did not stop in time")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := reinitPortAudio(); err != nil {
+		return fmt.Errorf("reinitialize audio: %w", err)
+	}
+	all, err := listPortAudioDevices()
+	if err != nil {
+		return fmt.Errorf("list audio devices: %w", err)
+	}
+	var devices []*pa.DeviceInfo
+	for _, d := range all {
+		if d.MaxInputChannels > 0 {
+			devices = append(devices, d)
+		}
+	}
+	appState.Devices = devices
+	return nil
+}
+
 func StartAudioEngine(streamer AudioStreamer, appState *state.AppState, cfg *config.Config, deviceID int, recordChan chan<- []float32, playbackChan chan<- []float32) error {
 	if streamer == nil {
 		streamer = &PADriver{}
 	}
+
+	devices := appState.Devices
+	if deviceID < 0 || deviceID >= len(devices) {
+		return fmt.Errorf("invalid device")
+	}
+	dev := devices[deviceID]
 
 	if q := appState.QuitAudio; q != nil {
 		close(q)
@@ -25,13 +135,6 @@ func StartAudioEngine(streamer AudioStreamer, appState *state.AppState, cfg *con
 	quit := make(chan bool)
 	appState.QuitAudio = quit
 	appState.Engine().SetRunning(true)
-
-	devices := appState.Devices
-
-	if deviceID >= len(devices) {
-		return fmt.Errorf("invalid device")
-	}
-	dev := devices[deviceID]
 
 	// Engine GoRoutine
 	logger := slog.With("component", "audio")

@@ -83,7 +83,7 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 
 	// Multi-page entry points (Prerendered)
 	r.GET("/", serveHTML("index.html"))
-	r.GET("/admin", serveHTML("admin.html"))
+	r.GET("/admin", AdminPageHandler(subFS))
 	r.GET("/login", serveHTML("login.html"))
 	r.GET("/stream", serveHTML("stream.html"))
 
@@ -103,6 +103,8 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 	{
 		// Auth
 		api.POST("/auth/session", LoginHandler(cfg, appState))
+		api.GET("/auth/session", GetSessionHandler())
+		api.DELETE("/auth/session", LogoutHandler())
 
 		// Audio
 		audio := api.Group("/audio")

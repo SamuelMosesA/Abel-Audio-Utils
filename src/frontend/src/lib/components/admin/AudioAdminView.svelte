@@ -35,9 +35,9 @@
         selectedDeviceValue = val;
     };
 
-    const handleLogout = () => {
-        system.logout();
-        goto("/");
+    const handleLogout = async () => {
+        await system.logout();
+        goto("/login");
     };
 
     const handleApplySettings = async () => {

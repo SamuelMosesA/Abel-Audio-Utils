@@ -6,10 +6,12 @@
     const { system } = getAppContext();
 
     $effect(() => {
-        if (system.isAuthenticated) {
+        if (system.authChecked && system.isAuthenticated) {
             goto("/admin");
         }
     });
 </script>
 
-<LoginView />
+{#if !system.isAuthenticated}
+    <LoginView />
+{/if}

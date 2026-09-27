@@ -5,6 +5,7 @@ import (
 	"abel/src/backend/lib/state"
 	"crypto/rand"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 
@@ -88,3 +89,85 @@ func SessionAuthMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// @Summary Get auth session status
+// @Description Checks if the current session is authenticated
+// @Tags Auth
+// @Produce json
+// @Success 200 {object} object "Session valid"
+// @Failure 401 {object} object "Unauthorized"
+// @Router /api/auth/session [get]
+func GetSessionHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store, private")
+		c.Header("Vary", "Cookie")
+
+		session := sessions.Default(c)
+		auth := session.Get("authenticated")
+		if auth != true {
+			c.JSON(http.StatusUnauthorized, gin.H{"authenticated": false, "error": "Unauthorized session"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"authenticated": true,
+			"username":      session.Get("username"),
+			"session_id":    session.Get("session_id"),
+		})
+	}
+}
+
+// @Summary Terminate auth session
+// @Description Logs out and invalidates the session
+// @Tags Auth
+// @Produce json
+// @Success 200 {object} object "Logout Success"
+// @Router /api/auth/session [delete]
+func LogoutHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store, private")
+		c.Header("Vary", "Cookie")
+
+		session := sessions.Default(c)
+		session.Clear()
+		session.Options(sessions.Options{
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   false,
+			SameSite: http.SameSiteLaxMode,
+		})
+		if err := session.Save(); err != nil {
+			slog.Error("Failed to clear session during logout", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear session"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": "logged_out"})
+	}
+}
+
+// AdminPageHandler serves admin.html if the session is authenticated,
+// otherwise redirecting to /login with cache prevention headers.
+func AdminPageHandler(fsys fs.FS) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store, private")
+		c.Header("Vary", "Cookie")
+
+		session := sessions.Default(c)
+		auth := session.Get("authenticated")
+		if auth != true {
+			c.Redirect(http.StatusFound, "/login")
+			c.Abort()
+			return
+		}
+
+		data, err := fs.ReadFile(fsys, "admin.html")
+		if err != nil {
+			c.String(http.StatusNotFound, "File not found")
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+	}
+}
+

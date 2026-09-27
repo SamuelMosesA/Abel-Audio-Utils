@@ -3,16 +3,16 @@
     import { getAppContext } from "$lib/audioState.svelte";
     import { goto } from "$app/navigation";
 
-    const { system, ui } = getAppContext();
+    const { system } = getAppContext();
 
-    // Reactive check for auth changes (logout)
+    // Reactive check for auth changes (logout or unauthenticated)
     $effect(() => {
-        if (!system.isAuthenticated) {
+        if (system.authChecked && !system.isAuthenticated) {
             goto("/login");
         }
     });
 </script>
 
-{#if system.isAuthenticated}
+{#if system.authChecked && system.isAuthenticated}
     <AudioAdminView />
 {/if}

@@ -172,21 +172,63 @@ export class SystemStore {
     serverUrl = $state("");
     ssid = $state("");
     isAuthenticated = $state(false);
+    authChecked = $state(false);
     sessionId = $state("");
+    initPromise: Promise<boolean> | null = null;
 
     #ws: WebSocket | null = null;
     #sse: EventSource | null = null;
     onMessage: ((dv: DataView) => void) | null = null;
 
     constructor(private ui: UIStore, private audio: AudioStore, private ai: AIStore) {
-        if (typeof window !== 'undefined' && window.localStorage) {
-            this.sessionId = localStorage.getItem("session_id") || "";
-            this.isAuthenticated = !!this.sessionId;
-            
-            if (this.isAuthenticated && window.location.protocol.startsWith('http')) {
-                this.setupSSE();
-                this.syncConnection();
+        if (typeof window !== 'undefined') {
+            if (window.location.protocol.startsWith('http')) {
+                this.initPromise = this.validateSession();
+            } else {
+                this.authChecked = true;
             }
+        } else {
+            this.authChecked = true;
+        }
+    }
+
+    async validateSession(): Promise<boolean> {
+        try {
+            const res = await fetch("/api/auth/session", {
+                method: "GET",
+                credentials: "include"
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.authenticated) {
+                    this.isAuthenticated = true;
+                    this.sessionId = data.session_id || "";
+                    if (typeof window !== 'undefined' && window.localStorage && this.sessionId) {
+                        localStorage.setItem("session_id", this.sessionId);
+                    }
+                    this.setupSSE();
+                    this.syncConnection();
+                    return true;
+                }
+            }
+            this.isAuthenticated = false;
+            this.sessionId = "";
+            if (typeof window !== 'undefined' && window.localStorage) {
+                localStorage.removeItem("session_id");
+                localStorage.removeItem("admin_user");
+            }
+            return false;
+        } catch (e) {
+            console.error("Error validating session", e);
+            this.isAuthenticated = false;
+            this.sessionId = "";
+            if (typeof window !== 'undefined' && window.localStorage) {
+                localStorage.removeItem("session_id");
+                localStorage.removeItem("admin_user");
+            }
+            return false;
+        } finally {
+            this.authChecked = true;
         }
     }
 
@@ -277,6 +319,7 @@ export class SystemStore {
                     }
                 }
                 this.isAuthenticated = true;
+                this.authChecked = true;
                 this.setupSSE();
                 this.syncConnection();
                 return true;
@@ -288,7 +331,15 @@ export class SystemStore {
         }
     }
 
-    logout() {
+    async logout(): Promise<void> {
+        try {
+            await fetch("/api/auth/session", {
+                method: "DELETE",
+                credentials: "include"
+            });
+        } catch (e) {
+            console.error("Logout error:", e);
+        }
         if (typeof window !== 'undefined' && window.localStorage) {
             localStorage.removeItem("admin_user");
             localStorage.removeItem("session_id");

@@ -2,8 +2,27 @@ import { vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 
 // Mock global fetch
-global.fetch = vi.fn().mockImplementation((input: any) => {
+global.fetch = vi.fn().mockImplementation((input: any, init?: any) => {
     const url = typeof input === 'string' ? input : input.url;
+    const method = (init?.method || (typeof input === 'object' ? input.method : undefined) || 'GET').toUpperCase();
+    if (url === '/api/auth/session') {
+        if (method === 'DELETE') {
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: async () => ({ status: 'logged_out' }),
+                text: async () => "",
+                headers: new Headers(),
+            });
+        }
+        return Promise.resolve({
+            ok: false,
+            status: 401,
+            json: async () => ({ authenticated: false, error: 'Unauthorized session' }),
+            text: async () => "",
+            headers: new Headers(),
+        });
+    }
     // Handle relative URLs in Node/Vitest environment
     if (url && url.startsWith('/')) {
         return Promise.resolve({

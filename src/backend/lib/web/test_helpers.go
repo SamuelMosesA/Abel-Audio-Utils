@@ -3,11 +3,18 @@ package web
 import (
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
+	"testing/fstest"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 )
+
+var testStaticFS = fstest.MapFS{
+	"admin.html": &fstest.MapFile{
+		Data: []byte("<html><body>Admin Dashboard</body></html>"),
+	},
+}
 
 func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -30,11 +37,14 @@ func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
 	api := r.Group("/api")
 	{
 		api.POST("/auth/session", LoginHandler(cfg, stateObj))
+		api.GET("/auth/session", GetSessionHandler())
+		api.DELETE("/auth/session", LogoutHandler())
 		RegisterAdminRoutes(api, stateObj, cfg)
 		api.GET("/recordings", GetRecordingStatus(stateObj))
 		api.GET("/ai/streams", GetAIStreamsStatus(stateObj))
 		api.GET("/system/connection", GetSystemConnection(cfg))
 	}
+	r.GET("/admin", AdminPageHandler(testStaticFS))
 	r.GET("/stream", StreamHandler())
 	r.GET("/subtitles/:lang", SubtitlesHandler(stateObj, cfg))
 	r.GET("/ws", NewWSHandler(stateObj, cfg))

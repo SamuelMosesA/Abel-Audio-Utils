@@ -20,7 +20,8 @@ func DevicesHandler(state *state.AppState) gin.HandlerFunc {
 	logger := slog.With("component", "api")
 	return func(c *gin.Context) {
 		logger.Info("Device list requested")
-		list := audioengine.GetDevices(state.Devices())
+		devices := state.Devices
+		list := audioengine.GetDevices(devices)
 		c.JSON(http.StatusOK, list)
 	}
 }
@@ -57,26 +58,20 @@ func UpdateAudioConfig(appState *state.AppState, cfg *config.Config) gin.Handler
 			return
 		}
 
-		// Start the engine outside state.Update: StartAudioEngine waits for the previous
-		// engine goroutine to exit, and that goroutine needs the state lock to do so.
-		var engineErr error
-		if req.DeviceID != nil {
-			engineErr = audioengine.StartAudioEngine(nil, appState, cfg, *req.DeviceID, appState.RecordChan, appState.PlaybackChan)
-			if engineErr != nil {
-				logger.Error("Error starting audio engine",
-					slog.Any("audio.error", engineErr),
-				)
-			} else {
-				logger.Info("Audio engine started",
-					slog.Int("audio.device_id", *req.DeviceID),
-				)
-			}
-		}
-
 		state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
-			if req.DeviceID != nil && engineErr == nil {
-				s.SetIsRunning(true)
-				s.SetDeviceID(int32(*req.DeviceID))
+			if req.DeviceID != nil {
+				err := audioengine.StartAudioEngine(nil, appState, cfg, *req.DeviceID, appState.RecordChan, appState.PlaybackChan)
+				if err != nil {
+					logger.Error("Error starting audio engine",
+						slog.Any("audio.error", err),
+					)
+				} else {
+					s.SetIsRunning(true)
+					s.SetDeviceID(int32(*req.DeviceID))
+					logger.Info("Audio engine started",
+						slog.Int("audio.device_id", *req.DeviceID),
+					)
+				}
 			}
 
 			if req.ChL != nil {
@@ -91,6 +86,41 @@ func UpdateAudioConfig(appState *state.AppState, cfg *config.Config) gin.Handler
 		})
 
 		c.JSON(http.StatusOK, gin.H{"status": "Interface updated"})
+	}
+}
+
+// @Summary Restart audio engine
+// @Description Re-scans audio devices so hardware connected after startup appears, reloads config.yaml and the credentials file, and reconnects to the previous device by name. Refused while recording.
+// @Tags Audio
+// @Produce json
+// @Success 200 {object} audioengine.RestartResult
+// @Failure 401 {object} string "Unauthorized"
+// @Failure 409 {object} string "Recording in progress"
+// @Failure 500 {object} string "Internal Error"
+// @Security CookieAuth
+// @Security BasicAuth
+// @Router /api/audio/restart [post]
+func RestartAudioEngine(appState *state.AppState, cfg *config.Config) gin.HandlerFunc {
+	logger := slog.With("component", "engine")
+	return func(c *gin.Context) {
+		if appState.IsRecording() {
+			c.JSON(http.StatusConflict, gin.H{"error": "Cannot restart the engine while recording"})
+			return
+		}
+
+		result, err := audioengine.RestartEngine(nil, appState, cfg)
+		if err != nil {
+			logger.Error("Engine restart failed", slog.Any("error", err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		logger.Info("Engine restarted",
+			slog.Int("audio.device_count", len(result.Devices)),
+			slog.String("audio.reconnected", result.Reconnected),
+			slog.String("config.error", result.ConfigError),
+		)
+		c.JSON(http.StatusOK, result)
 	}
 }
 

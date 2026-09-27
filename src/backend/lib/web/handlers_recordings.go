@@ -59,10 +59,6 @@ func CreateRecording(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 					err = fmt.Errorf("already recording")
 					return
 				}
-				if appState.Engine().IsRestarting() {
-					err = fmt.Errorf("engine restart in progress")
-					return
-				}
 				folder := req.Folder
 				if folder == "" {
 					folder = appState.Locations().Storage()

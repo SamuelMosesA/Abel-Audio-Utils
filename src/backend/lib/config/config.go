@@ -3,9 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
-	"slices"
 	"strings"
-	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -37,71 +35,8 @@ type Config struct {
 	// Loaded from credentials file
 	Credentials map[string]string `yaml:"-"`
 
-	// Guards fields that ApplyReload changes while the server is running.
-	mu sync.RWMutex
-}
-
-// CheckCredentials reports whether username/password match the loaded credentials file.
-func (cfg *Config) CheckCredentials(username, password string) bool {
-	cfg.mu.RLock()
-	defer cfg.mu.RUnlock()
-	p, ok := cfg.Credentials[username]
-	return ok && p == password
-}
-
-// ReloadChanges describes what ApplyReload did with a freshly loaded config.
-type ReloadChanges struct {
-	DefaultChL   bool
-	DefaultChR   bool
-	DefaultBoost bool
-	// Settings that changed on disk but only take effect after a full restart of Abel.
-	NeedsFullRestart []string
-}
-
-// ApplyReload copies the settings that are safe to change while Abel is running
-// (credentials, default routing/gain, sample rate, buffer size) from fresh into cfg,
-// and lists changed settings that still need a full restart.
-// The audio engine must be stopped first: it reads SampleRate and BufferSize without locking.
-func (cfg *Config) ApplyReload(fresh *Config) ReloadChanges {
-	cfg.mu.Lock()
-	defer cfg.mu.Unlock()
-
-	changes := ReloadChanges{
-		DefaultChL:   cfg.DefaultChL != fresh.DefaultChL,
-		DefaultChR:   cfg.DefaultChR != fresh.DefaultChR,
-		DefaultBoost: cfg.DefaultBoost != fresh.DefaultBoost,
-	}
-
-	cfg.DefaultChL = fresh.DefaultChL
-	cfg.DefaultChR = fresh.DefaultChR
-	cfg.DefaultBoost = fresh.DefaultBoost
-	cfg.SampleRate = fresh.SampleRate
-	cfg.BufferSize = fresh.BufferSize
-	cfg.AdminUserCredentials = fresh.AdminUserCredentials
-	cfg.Credentials = fresh.Credentials
-
-	fullRestart := []struct {
-		name    string
-		changed bool
-	}{
-		{"port", cfg.Port != fresh.Port},
-		{"storage_location", cfg.StorageLocation != fresh.StorageLocation},
-		{"cloud_drive_location", cfg.CloudDriveLocation != fresh.CloudDriveLocation},
-		{"openai_api_key", cfg.OpenAIAPIKey != fresh.OpenAIAPIKey},
-		{"openai_translate_model", cfg.OpenAITranslateModel != fresh.OpenAITranslateModel},
-		{"openai_transcribe_model", cfg.OpenAITranscribeModel != fresh.OpenAITranscribeModel},
-		{"openai_voice", cfg.OpenAIVoice != fresh.OpenAIVoice},
-		{"ai_languages", !slices.Equal(cfg.AILanguages, fresh.AILanguages)},
-		{"ai_original_language", cfg.AIOriginalLanguage != fresh.AIOriginalLanguage},
-		{"otlp_endpoint", cfg.OTLPEndpoint != fresh.OTLPEndpoint},
-	}
-	for _, f := range fullRestart {
-		if f.changed {
-			changes.NeedsFullRestart = append(changes.NeedsFullRestart, f.name)
-		}
-	}
-
-	return changes
+	// File the config was loaded from, used to reload it on engine restart
+	Path string `yaml:"-"`
 }
 
 func (cfg *Config) ResolveLanguageName(code string) string {
@@ -141,6 +76,7 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.Path = path
 
 	// Load credentials if configured
 	cfg.Credentials = make(map[string]string)

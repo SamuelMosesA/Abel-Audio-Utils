@@ -33,39 +33,9 @@ export interface AppStatus {
 
 import { fetchWithSync } from "./utils/api";
 
-export interface RestartResult {
-    devices: Device[];
-    deviceID: number;
-    restoredDevice?: string;
-    missingDevice?: string;
-    restoreError?: string;
-    configReloaded: boolean;
-    configError?: string;
-    needsFullRestart?: string[];
-}
-
-/** Turns a restart result into the message shown to the admin. */
-export function describeRestart(result: RestartResult): string {
-    const count = result.devices.length;
-    const parts = [`Engine restarted. ${count} device${count === 1 ? "" : "s"} found.`];
-    if (result.restoredDevice) {
-        parts.push(`Reconnected to ${result.restoredDevice}.`);
-    } else if (result.missingDevice) {
-        parts.push(`${result.missingDevice} could not be reconnected. Please select a device.`);
-    }
-    if (result.configError) {
-        parts.push(`Settings were not reloaded: ${result.configError}`);
-    }
-    if (result.needsFullRestart?.length) {
-        parts.push(`Close and reopen Abel to apply: ${result.needsFullRestart.join(", ")}.`);
-    }
-    return parts.join(" ");
-}
-
 export class AudioStore {
     isRunning = $state(false);
     isRecording = $state(false);
-    isRestarting = $state(false);
     devices = $state<Device[]>([]);
     selectedDeviceId = $state(0);
     chL = $state(0);
@@ -115,26 +85,6 @@ export class AudioStore {
             body: JSON.stringify(payload)
         });
         await this.sync();
-    }
-
-    /** Re-scans audio devices and reloads config on the server. */
-    async restartEngine(): Promise<{ ok: boolean; message: string }> {
-        this.isRestarting = true;
-        try {
-            const res = await fetchWithSync("/api/system/restart", { method: "POST" });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                return { ok: false, message: body.error ?? `Restart failed (${res.status})` };
-            }
-            const result = body as RestartResult;
-            this.devices = result.devices;
-            return { ok: true, message: describeRestart(result) };
-        } catch (e) {
-            return { ok: false, message: `Restart failed: ${e}` };
-        } finally {
-            await this.sync();
-            this.isRestarting = false;
-        }
     }
 
     async toggleRecording() {

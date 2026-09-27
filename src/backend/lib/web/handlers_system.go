@@ -1,13 +1,10 @@
 package web
 
 import (
-	"abel/src/backend/lib/audioengine"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"os/exec"
@@ -99,44 +96,6 @@ func ChangeLogHandler(appState *state.AppState) gin.HandlerFunc {
 				fmt.Fprintf(c.Writer, ": keep-alive\n\n")
 				flusher.Flush()
 			}
-		}
-	}
-}
-
-// EngineRestarter re-scans audio devices and reloads config without stopping the server.
-type EngineRestarter interface {
-	Restart() (audioengine.RestartResult, error)
-}
-
-// @Summary Restart audio engine
-// @Description Stops the audio engine, re-scans audio devices, reloads config.yaml and the credentials file, and reconnects to the previously selected device by name. Refused while recording.
-// @Tags System
-// @Produce json
-// @Success 200 {object} audioengine.RestartResult
-// @Failure 401 {object} string "Unauthorized"
-// @Failure 409 {object} string "Recording in progress or restart already running"
-// @Failure 500 {object} string "Internal Error"
-// @Failure 503 {object} string "Restart unavailable"
-// @Security CookieAuth
-// @Security BasicAuth
-// @Router /api/system/restart [post]
-func RestartEngineHandler(restarter EngineRestarter) gin.HandlerFunc {
-	logger := slog.With("component", "engine")
-	return func(c *gin.Context) {
-		if restarter == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Engine restart unavailable"})
-			return
-		}
-
-		result, err := restarter.Restart()
-		switch {
-		case errors.Is(err, audioengine.ErrRecordingInProgress), errors.Is(err, audioengine.ErrRestartInProgress):
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-		case err != nil:
-			logger.Error("Engine restart failed", slog.Any("error", err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		default:
-			c.JSON(http.StatusOK, result)
 		}
 	}
 }

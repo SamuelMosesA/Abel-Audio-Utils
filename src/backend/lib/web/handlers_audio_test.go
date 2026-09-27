@@ -94,6 +94,31 @@ func TestHLSHandlersServeSafariCompatibleContract(t *testing.T) {
 	assert.Equal(t, provider.segment, segmentResponse.Body.Bytes())
 }
 
+func TestRestartAudioEngineRequiresLogin(t *testing.T) {
+	router := setupTestRouter(state.NewAppState("", ""), &config.Config{})
+
+	req, _ := http.NewRequest(http.MethodPost, "/api/audio/restart", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestRestartAudioEngineRefusedWhileRecording(t *testing.T) {
+	appState := state.NewAppState("", "")
+	state.Update[state.RecordIntent](appState, state.SectionRecording, func(s *state.RecordIntent) { s.SetRecording(true) })
+	router := setupTestRouter(appState, &config.Config{})
+
+	req, _ := http.NewRequest(http.MethodPost, "/api/audio/restart", nil)
+	req.Header.Set("X-Test-Auth", "true")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "while recording")
+	assert.True(t, appState.IsRecording(), "recording must be untouched")
+}
+
 func TestUpdateAudioConfigInvalidDeviceDoesNotPanic(t *testing.T) {
 	appState := state.NewAppState("", "")
 	router := setupTestRouter(appState, &config.Config{})

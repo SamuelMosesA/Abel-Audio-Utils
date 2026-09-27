@@ -9,7 +9,6 @@ type EngineState struct {
 	samplesWrote atomic.Int64
 	file         *os.File // Guarded by the fact that only one engine thread exists
 	isRunning    atomic.Bool
-	restarting   atomic.Bool
 }
 
 func (e *EngineState) SamplesWrote() int64 {
@@ -38,17 +37,4 @@ func (e *EngineState) IsRunning() bool {
 
 func (e *EngineState) SetRunning(b bool) {
 	e.isRunning.Store(b)
-}
-
-// BeginRestart marks an engine restart as in progress. It returns false if one is already running.
-func (e *EngineState) BeginRestart() bool {
-	return e.restarting.CompareAndSwap(false, true)
-}
-
-func (e *EngineState) EndRestart() {
-	e.restarting.Store(false)
-}
-
-func (e *EngineState) IsRestarting() bool {
-	return e.restarting.Load()
 }

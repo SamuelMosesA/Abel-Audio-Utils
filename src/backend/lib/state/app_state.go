@@ -81,11 +81,6 @@ type AppState struct {
 	AdminClient     *WSClient
 	MasterSessionID string
 	QuitAudio       chan bool
-	EngineDone      chan struct{} // Closed by the engine goroutine once its stream is closed
-
-	// EngineLifecycle serializes starting, stopping and restarting the audio engine.
-	// Never acquire it while holding mu: the engine loop takes mu on every read.
-	EngineLifecycle sync.Mutex
 
 	RecordChan   chan []float32
 	PlaybackChan chan []float32
@@ -93,9 +88,7 @@ type AppState struct {
 	StreamChannels sync.Map // map[chan []float32]bool
 	BroadcastHub   sync.Map // map[chan StateChange]bool
 
-	devicesMu sync.RWMutex
-	devices   []*pa.DeviceInfo
-
+	Devices []*pa.DeviceInfo
 	Translator Translator
 }
 
@@ -137,20 +130,6 @@ func (s *AppState) Locations() StaticLocations {
 
 func (s *AppState) Engine() *EngineState {
 	return &s.engine
-}
-
-// Devices returns the input-capable devices found by the last device scan.
-func (s *AppState) Devices() []*pa.DeviceInfo {
-	s.devicesMu.RLock()
-	defer s.devicesMu.RUnlock()
-	return s.devices
-}
-
-// SetDevices replaces the device list, e.g. after an engine restart re-scans hardware.
-func (s *AppState) SetDevices(devices []*pa.DeviceInfo) {
-	s.devicesMu.Lock()
-	defer s.devicesMu.Unlock()
-	s.devices = devices
 }
 
 func (s *AppState) Broadcast(sec Section) {

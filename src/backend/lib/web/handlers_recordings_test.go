@@ -137,21 +137,3 @@ func TestPushRecordingToCloud(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }
-
-func TestCreateRecordingRefusedWhileEngineRestarting(t *testing.T) {
-	tmpDir := t.TempDir()
-	appState := state.NewAppState(tmpDir, "")
-	router := setupTestRouter(appState, &config.Config{SampleRate: 44100, StorageLocation: tmpDir})
-	appState.Engine().BeginRestart()
-
-	body, _ := json.Marshal(map[string]string{"action": "start"})
-	req, _ := http.NewRequest("POST", "/api/recordings", bytes.NewBuffer(body))
-	req.Header.Set("X-Test-Auth", "true")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "engine restart in progress")
-	assert.False(t, appState.IsRecording())
-	assert.Nil(t, appState.Engine().File())
-}

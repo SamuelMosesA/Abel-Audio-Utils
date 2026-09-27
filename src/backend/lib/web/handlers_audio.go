@@ -1,13 +1,17 @@
 package web
 
 import (
-	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/audioengine"
+	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
-	"encoding/binary"
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -110,99 +114,87 @@ func GetAudioConfig(appState *state.AppState) gin.HandlerFunc {
 	}
 }
 
-func StreamHandler(appState *state.AppState, cfg *config.Config) gin.HandlerFunc {
-	logger := slog.With("component", "stream")
+type HLSProvider interface {
+	EnsureStream(language string, sampleRate int, source <-chan []float32) error
+	WaitForPlaylist(ctx context.Context, language string, timeout time.Duration) ([]byte, error)
+	ReadSegment(language, name string) ([]byte, error)
+}
+
+func streamLanguage(path string) string {
+	language := filepath.Base(path)
+	if language == "stream" || language == "." || language == "/" || language == "" {
+		return "default"
+	}
+	return language
+}
+
+// StreamHandler preserves the old URL while moving clients to the HLS stream.
+func StreamHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		lang := filepath.Base(c.Request.URL.Path)
-		if lang == "stream" || lang == "/" {
-			lang = "default"
+		language := streamLanguage(c.Request.URL.Path)
+		target := "/api/audio/hls/" + url.PathEscape(language) + "/index.m3u8"
+		c.Redirect(http.StatusTemporaryRedirect, target)
+	}
+}
+
+func HLSPlaylistHandler(appState *state.AppState, cfg *config.Config, publisher HLSProvider) gin.HandlerFunc {
+	logger := slog.With("component", "hls")
+	return func(c *gin.Context) {
+		language := c.Param("lang")
+		if language == cfg.AIOriginalLanguage {
+			c.Redirect(http.StatusTemporaryRedirect, "/api/audio/hls/default/index.m3u8")
+			return
 		}
 
-		connLogger := logger.With(
-			slog.String("client.ip", c.Request.RemoteAddr),
-			slog.String("client.language", lang),
-		)
-
-		connLogger.Info("New listener connection requested")
-
-		c.Header("Content-Type", "audio/wav")
-		c.Header("Connection", "keep-alive")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("X-Accel-Buffering", "no")
-
-		// Write a dummy WAV header for a "forever" stream
-		// 44 bytes header
-		header := make([]byte, 44)
-		copy(header[0:4], "RIFF")
-		binary.LittleEndian.PutUint32(header[4:8], 0xFFFFFFFF) // File size
-		copy(header[8:12], "WAVE")
-		copy(header[12:16], "fmt ")
-		binary.LittleEndian.PutUint32(header[16:20], 16) // fmt chunk size
-		binary.LittleEndian.PutUint16(header[20:22], 1)  // PCM
-		binary.LittleEndian.PutUint16(header[22:24], 2)  // Channels
 		sampleRate := int(appState.Config().SampleRate())
 		if sampleRate <= 0 {
 			sampleRate = cfg.SampleRate
 		}
-		binary.LittleEndian.PutUint32(header[24:28], uint32(sampleRate))
-		binary.LittleEndian.PutUint32(header[28:32], uint32(sampleRate*2*2)) // Byte rate
-		binary.LittleEndian.PutUint16(header[32:34], 4)                          // Block align
-		binary.LittleEndian.PutUint16(header[34:36], 16)                         // Bits per sample
-		copy(header[36:40], "data")
-		binary.LittleEndian.PutUint32(header[40:44], 0xFFFFFFFF) // Data size
 
-		c.Writer.Write(header)
-		if f, ok := c.Writer.(http.Flusher); ok {
-			f.Flush()
-		}
-
-		// Create or get the audio channel
-		var ch chan []float32
-		isTranslated := false
-		
-		// Use ISO codes for AI stream lookup
-		if lang != "default" && lang != cfg.AIOriginalLanguage && appState.Translator != nil {
-			ch = appState.Translator.GetChannel(lang)
-			if ch != nil {
-				isTranslated = true
+		var source <-chan []float32
+		if language != "default" {
+			if appState.Translator == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "translation audio is unavailable"})
+				return
 			}
-		}
-
-		if ch == nil {
-			// fallback to standard stream
-			ch = make(chan []float32, 100)
-			appState.StreamChannels.Store(ch, true)
-			defer appState.StreamChannels.Delete(ch)
-		}
-
-		connLogger.Info("New listener connected",
-			slog.Bool("client.translated", isTranslated),
-		)
-		defer connLogger.Info("Listener disconnected")
-
-		// Write PCM data
-		for {
-			select {
-			case chunk, ok := <-ch:
-				if !ok {
-					return
-				}
-				// Convert float32 [-1, 1] to i16 for classic WAV
-				pcmBuf := make([]byte, len(chunk)*2)
-				for i, v := range chunk {
-					s := int16(v * 32767)
-					binary.LittleEndian.PutUint16(pcmBuf[i*2:], uint16(s))
-				}
-				_, err := c.Writer.Write(pcmBuf)
-				if err != nil {
-					return
-				}
-				if f, ok := c.Writer.(http.Flusher); ok {
-					f.Flush()
-				}
-			case <-c.Request.Context().Done():
+			source = appState.Translator.GetChannel(language)
+			if source == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "translation audio is unavailable"})
 				return
 			}
 		}
+
+		if err := publisher.EnsureStream(language, sampleRate, source); err != nil {
+			logger.Error("Failed to start HLS stream", slog.String("stream.language", language), slog.Any("error", err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "audio stream is unavailable"})
+			return
+		}
+
+		playlist, err := publisher.WaitForPlaylist(c.Request.Context(), language, 8*time.Second)
+		if err != nil {
+			logger.Warn("HLS playlist not ready", slog.String("stream.language", language), slog.Any("error", err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "audio stream is not ready"})
+			return
+		}
+
+		c.Header("Cache-Control", "no-store")
+		c.Header("X-Accel-Buffering", "no")
+		c.Data(http.StatusOK, "application/vnd.apple.mpegurl", playlist)
+	}
+}
+
+func HLSSegmentHandler(publisher HLSProvider) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		data, err := publisher.ReadSegment(c.Param("lang"), c.Param("segment"))
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, audioengine.ErrHLSNotReady) {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			c.Status(http.StatusBadRequest)
+			return
+		}
+		c.Header("Cache-Control", "public, max-age=30, immutable")
+		c.Data(http.StatusOK, "video/mp2t", data)
 	}
 }

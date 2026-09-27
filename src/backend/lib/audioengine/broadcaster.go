@@ -6,9 +6,13 @@ import (
 	"abel/src/backend/lib/telemetry"
 	"context"
 	"encoding/binary"
-	"math"
 	"github.com/gorilla/websocket"
+	"math"
 )
+
+type LiveAudioPublisher interface {
+	Publish(language string, sampleRate int, chunk []float32) error
+}
 
 // CalculatePeakMeters finds the peak (maximum absolute) volume for left and right channels.
 func CalculatePeakMeters(buffer []float32) (float32, float32) {
@@ -27,7 +31,7 @@ func CalculatePeakMeters(buffer []float32) (float32, float32) {
 }
 
 // StartAudioBroadcaster starts a goroutine that continuously broadcasts audio data to connected WebSocket clients.
-func StartAudioBroadcaster(appState *state.AppState, cfg *config.Config, playbackChan <-chan []float32) {
+func StartAudioBroadcaster(appState *state.AppState, cfg *config.Config, playbackChan <-chan []float32, livePublisher LiveAudioPublisher) {
 	go func() {
 		for chunk := range playbackChan {
 			// Calculate peak meters for the chunk
@@ -65,6 +69,15 @@ func StartAudioBroadcaster(appState *state.AppState, cfg *config.Config, playbac
 				}
 				return true
 			})
+
+			if livePublisher != nil {
+				sampleRate := int(appState.Config().SampleRate())
+				if sampleRate <= 0 {
+					sampleRate = cfg.SampleRate
+				}
+				// Publishing is non-blocking; encoder failures must not interrupt capture.
+				_ = livePublisher.Publish("default", sampleRate, chunk)
+			}
 
 			// Push to AI for translation
 			if appState.Translator != nil {

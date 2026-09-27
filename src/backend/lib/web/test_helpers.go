@@ -35,7 +35,7 @@ func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
 		api.GET("/ai/streams", GetAIStreamsStatus(stateObj))
 		api.GET("/system/connection", GetSystemConnection(cfg))
 	}
-	r.GET("/stream", StreamHandler(stateObj, cfg))
+	r.GET("/stream", StreamHandler())
 	r.GET("/subtitles/:lang", SubtitlesHandler(stateObj, cfg))
 	r.GET("/ws", NewWSHandler(stateObj, cfg))
 	

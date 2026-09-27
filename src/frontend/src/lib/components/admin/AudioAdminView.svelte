@@ -69,6 +69,16 @@
             restarting = false;
         }
     };
+
+    const handleRecording = async () => {
+        try {
+            const result = await audio.toggleRecording();
+            await files.fetchFiles();
+            if (result.processingError) ui.showNotification(result.processingError, "Recording processing");
+        } catch (error) {
+            ui.showNotification(error instanceof Error ? error.message : String(error), "Recording");
+        }
+    };
 </script>
 
 <div class="max-w-screen-2xl mx-auto space-y-8 py-12 px-4 animate-in fade-in duration-500">
@@ -114,7 +124,7 @@
                     <div class="grid grid-cols-2 gap-4 w-full">
                         <Button 
                             class="h-28 flex flex-col gap-2 font-black text-lg" 
-                            onclick={async () => { if (!audio.isRecording) { await audio.toggleRecording(); await files.fetchFiles(); } }}
+                            onclick={handleRecording}
                             disabled={audio.isRecording}
                         >
                             <Play class="w-8 h-8 fill-current" />
@@ -123,7 +133,7 @@
                         <Button 
                             variant="destructive"
                             class="h-28 flex flex-col gap-2 font-black text-lg" 
-                            onclick={async () => { if (audio.isRecording) { await audio.toggleRecording(); await files.fetchFiles(); } }}
+                            onclick={handleRecording}
                             disabled={!audio.isRecording}
                         >
                             <Square class="w-8 h-8 fill-current" />

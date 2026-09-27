@@ -1,162 +1,279 @@
 <script lang="ts">
-    import { FileAudio, Cloud, X, Info, HardDrive, Archive } from "lucide-svelte";
+    import { Cloud, Scissors, RotateCcw, X, Upload } from "lucide-svelte";
     import Card from "../ui/Card.svelte";
     import Button from "../ui/Button.svelte";
+    import { onMount } from "svelte";
     import { getAppContext, type RecordedFile } from "../../audioState.svelte";
+    import AudioPlayer from "./AudioPlayer.svelte";
+    import { formatTimecode, parseTimecode } from "../../utils/timecode";
 
-    const { files, audio } = getAppContext();
+    const { files, ui, audio } = getAppContext();
+    let picker = $state<HTMLInputElement | null>(null);
+    let dragging = $state(false);
+    let uploading = $state(false);
+    let uploadName = $state("");
+    let uploadProgress = $state(0);
+    let editing = $state<RecordedFile | null>(null);
+    let previewPlayer = $state<AudioPlayer | null>(null);
+    let previewPosition = $state(0);
+    let startText = $state("0:00");
+    let endText = $state("0:00");
+    let busy = $state(false);
+    let pushing = $state("");
+    let stopping = $state("");
+    let error = $state("");
 
-    let pushingFile = $state<RecordedFile | null>(null);
-    let targetFilename = $state("");
+    const size = (bytes: number) => (bytes / 1048576).toFixed(1) + " MB";
+    const time = formatTimecode;
+    const active = (file: RecordedFile) => file.jobs.find(j => j.stage === "queued" || j.stage === "analyzing" || j.stage === "encoding" || j.stage === "pushing");
+    const lastAutomatic = (file: RecordedFile) => [...file.jobs].reverse().find(j => j.autoPush);
+    const processed = (file: RecordedFile) => file.exports.find(e => e.name.endsWith("-processed.mp3"));
 
-    const openPushDialog = (file: RecordedFile) => {
-        pushingFile = file;
-        const date = new Date().toISOString().split('T')[0];
-        targetFilename = `${date}.wav`;
-    };
+    onMount(() => {
+        void files.fetchFiles();
+        const interval = window.setInterval(() => void files.fetchFiles(), 2000);
+        return () => window.clearInterval(interval);
+    });
 
-    const handlePush = async () => {
-        if (!pushingFile || !targetFilename) return;
-        const res = await files.pushToCloud(pushingFile.name, targetFilename);
-        if (res.success) {
-            pushingFile = null;
-        } else {
-            alert("Failed to push: " + res.error);
+    async function uploadFiles(selected: File[]) {
+        if (uploading || selected.length === 0) return;
+        error = "";
+        uploading = true;
+        try {
+            for (const file of selected) {
+                if (!/\.(wav|mp3|m4a|flac|aac|ogg)$/i.test(file.name)) {
+                    error = "Unsupported audio file: " + file.name;
+                    continue;
+                }
+                uploadName = file.name;
+                uploadProgress = 0;
+                const result = await files.upload(file, percent => uploadProgress = percent);
+                if (!result.success) {
+                    error = file.name + ": " + (result.error || "Upload failed");
+                } else if (result.processingError) {
+                    error = file.name + " was imported, but processing could not start: " + result.processingError;
+                } else {
+                    ui.showNotification(file.name + " imported. Processing started.", "Recording import");
+                }
+            }
+        } finally {
+            uploading = false;
+            uploadName = "";
         }
-    };
+    }
 
-    const formatSize = (bytes: number) => {
-        const mb = bytes / (1024 * 1024);
-        return `${mb.toFixed(1)} MB`;
-    };
+    function drop(event: DragEvent) {
+        event.preventDefault();
+        dragging = false;
+        void uploadFiles(Array.from(event.dataTransfer?.files || []));
+    }
 
-    const formatDate = (dateStr: string) => {
-        return new Date(dateStr).toLocaleString();
-    };
+    function paste(event: ClipboardEvent) {
+        const pasted = Array.from(event.clipboardData?.files || []);
+        if (pasted.length === 0) {
+            for (const item of Array.from(event.clipboardData?.items || [])) {
+                const file = item.getAsFile();
+                if (file) pasted.push(file);
+            }
+        }
+        const mimeExtensions: Record<string, string> = {
+            "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/mpeg": ".mp3",
+            "audio/mp4": ".m4a", "audio/flac": ".flac", "audio/aac": ".aac", "audio/ogg": ".ogg"
+        };
+        const audio = pasted.map(file => {
+            if (/\.(wav|mp3|m4a|flac|aac|ogg)$/i.test(file.name)) return file;
+            const extension = mimeExtensions[file.type];
+            return extension ? new File([file], "clipboard-" + Date.now() + extension, { type: file.type }) : file;
+        });
+        if (audio.length > 0) {
+            event.preventDefault();
+            void uploadFiles(audio);
+        }
+    }
+
+    function edit(file: RecordedFile) {
+        const ready = processed(file);
+        if (!ready || ready.duration < 0.5) return;
+        editing = file;
+        previewPosition = 0;
+        startText = "0:00";
+        endText = time(ready.duration);
+        error = "";
+    }
+
+    async function trim() {
+        if (!editing) return;
+        const ready = processed(editing);
+        const start = parseTimecode(startText);
+        const end = parseTimecode(endText);
+        if (!ready || start === null || end === null || start < 0 || end > ready.duration + 0.05 || end - start < 0.5) {
+            error = "Use mm:ss or hh:mm:ss and keep at least 0.5 seconds within the processed audio.";
+            return;
+        }
+        busy = true;
+        const result = await files.process(editing.name, start, end);
+        busy = false;
+        if (result.success) {
+            editing = null;
+            ui.showNotification("Trim started. The MP3 will be pushed to cloud when ready.", "Recording trim");
+        } else error = result.error || "Could not start trimming.";
+    }
+
+    async function retry(file: RecordedFile) {
+        error = "";
+        const result = await files.process(file.name, 0, 0, true);
+        if (!result.success) error = result.error || "Could not start processing.";
+    }
+
+    async function push(name: string) {
+        error = "";
+        pushing = name;
+        const result = await files.pushToCloud(name);
+        pushing = "";
+        if (!result.success) error = result.error || "Could not push audio to cloud.";
+    }
+    async function stop(id: string) {
+        error = "";
+        stopping = id;
+        const result = await files.cancelProcessing(id);
+        stopping = "";
+        if (!result.success) error = result.error || "Could not stop processing.";
+    }
+    function setBoundary(boundary: "start" | "end") {
+        if (boundary === "start") startText = time(previewPosition);
+        else endText = time(previewPosition);
+        error = "";
+    }
+    function previewSelection() {
+        const start = parseTimecode(startText);
+        const end = parseTimecode(endText);
+        if (start === null || end === null || end - start < 0.5) { error = "Enter a valid start and end before previewing."; return; }
+        void previewPlayer?.playSelection(start, end);
+    }
 </script>
 
+<svelte:window onpaste={paste} />
+
 <Card title="Master Recording Library">
-    <div class="space-y-8">
-        <!-- System Paths -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
-            <div class="p-4 bg-muted/20 border border-dashed border-border rounded-xl space-y-2 group overflow-hidden">
-                <div class="flex items-center gap-2 text-xxs font-black uppercase tracking-widest text-muted-foreground group-hover:text-primary transition-colors">
-                    <HardDrive class="w-3 h-3" />
-                    Storage Cluster
+    <div class="space-y-4">
+        {#if audio.storageLocation}<p class="text-xs text-muted-foreground break-all">Recordings folder: <span class="text-foreground">{audio.storageLocation}</span></p>{/if}
+        {#if audio.cloudDriveLocation}<p class="text-xs text-muted-foreground break-all">Cloud folder: <span class="text-foreground">{audio.cloudDriveLocation}</span></p>{/if}
+        <div role="region" aria-label="Import audio" class="rounded-xl border-2 border-dashed p-5 text-center transition-colors {dragging ? 'border-primary bg-primary/10' : 'border-border bg-muted/10'}"
+            ondragenter={(event) => { event.preventDefault(); dragging = true; }}
+            ondragover={(event) => event.preventDefault()}
+            ondragleave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) dragging = false; }}
+            ondrop={drop}>
+            <input bind:this={picker} type="file" accept="audio/*,.wav,.mp3,.m4a,.flac,.aac,.ogg" multiple class="sr-only"
+                onchange={(event) => { void uploadFiles(Array.from(event.currentTarget.files || [])); event.currentTarget.value = ""; }} />
+            <p class="text-sm font-medium mb-1">Import audio to process</p>
+            <p class="text-xs text-muted-foreground mb-3">Choose files, drop them here, or paste from the clipboard. WAV, MP3, M4A, FLAC, AAC, and OGG are supported.</p>
+            <Button size="sm" variant="outline" onclick={() => picker?.click()} disabled={uploading}><Upload class="w-4 h-4 mr-2" /> Choose files</Button>
+            {#if uploading}
+                <div class="mt-4 space-y-1" aria-live="polite">
+                    <p class="text-xs text-muted-foreground">Uploading {uploadName} · {uploadProgress}%</p>
+                    <progress class="w-full h-2 accent-primary" value={uploadProgress} max="100"></progress>
                 </div>
-                <p class="text-micro font-mono text-white/60 truncate" title={audio.storageLocation}>
-                    {audio.storageLocation}
-                </p>
-            </div>
-            <div class="p-4 bg-muted/20 border border-dashed border-border rounded-xl space-y-2 group overflow-hidden">
-                <div class="flex items-center gap-2 text-xxs font-black uppercase tracking-widest text-muted-foreground group-hover:text-primary transition-colors">
-                    <Archive class="w-3 h-3" />
-                    Remote Archive
-                </div>
-                <p class="text-micro font-mono text-white/60 truncate" title={audio.cloudDriveLocation}>
-                    {audio.cloudDriveLocation}
-                </p>
-            </div>
-        </div>
-
-        <div class="space-y-3">
-            {#if files.recordedFiles.length === 0}
-                <div class="py-16 text-center border-2 border-dashed border-border/20 rounded-2xl flex flex-col items-center gap-3">
-                    <FileAudio class="w-10 h-10 text-muted/10" />
-                    <p class="text-xs font-bold uppercase tracking-widest text-muted/40">No System Archives Found</p>
-                </div>
-            {:else}
-                {#each files.recordedFiles as file}
-                    <div class="flex flex-col xl:flex-row xl:items-center justify-between p-4 bg-muted/20 border border-border/40 rounded-xl hover:bg-muted/30 transition-all gap-4">
-                        <div class="flex items-center gap-4 min-w-0">
-                            <div class="p-3 bg-primary/10 rounded-xl text-primary shrink-0">
-                                <FileAudio class="w-6 h-6" />
-                            </div>
-                            <div class="space-y-1 min-w-0">
-                                <h3 class="font-bold text-sm text-white truncate">{file.name}</h3>
-                                <div class="flex items-center gap-3 text-xxs font-black uppercase tracking-widest text-muted-foreground/60">
-                                    <span class="text-primary/70">{formatSize(file.size)}</span>
-                                    <span>•</span>
-                                    <span>{formatDate(file.modTime)}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="flex items-center gap-4 w-full xl:w-auto">
-                            <audio 
-                                controls 
-                                src="/api/recordings/raw/{file.name}" 
-                                class="h-9 flex-1 xl:w-64"
-                            ></audio>
-                            <Button size="sm" variant="outline" onclick={() => openPushDialog(file)}>
-                                <Cloud class="w-4 h-4 mr-2" /> Push
-                            </Button>
-                        </div>
-                    </div>
-                {/each}
             {/if}
         </div>
+        {#if error}<p role="alert" class="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">{error}</p>{/if}
+        {#if files.loadError}<p role="alert" class="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">{files.loadError}</p>{/if}
+        {#if files.recordedFiles.length === 0}
+            <p class="py-12 text-center text-muted-foreground">No recordings yet</p>
+        {/if}
+        {#each files.recordedFiles as file (file.name)}
+            {@const job = active(file)}
+            {@const latest = lastAutomatic(file)}
+            {@const failed = latest?.stage === "failed" ? latest : null}
+            {@const initial = processed(file)}
+            <section class="p-4 bg-muted/20 border border-border/40 rounded-xl space-y-4">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <h3 class="font-bold text-sm text-white truncate">{file.display || file.name.replace(/\.wav$/i, "")}</h3>
+                        <p class="text-xs text-muted-foreground">{new Date(file.modTime).toLocaleString()} · {time(initial?.duration ?? file.duration)} · {size(initial?.size ?? file.size)}</p>
+                        <p class="text-xs text-muted-foreground break-all" title={audio.storageLocation + "/" + (initial?.name ?? file.name)}>{audio.storageLocation}/{initial?.name ?? file.name}</p>
+                    </div>
+                    <Button size="sm" variant="outline" onclick={() => edit(file)} disabled={!initial || initial.duration < 0.5} title={!initial ? "Available after MP3 processing finishes" : "Trim processed MP3"}><Scissors class="w-4 h-4 mr-2" /> Trim</Button>
+                </div>
+                {#if job}
+                    <div class="space-y-1" aria-live="polite">
+                        <div class="flex items-center justify-between gap-2 text-xs capitalize"><span>{job.stage} audio…</span><span>{(job.stage === "analyzing" || job.stage === "encoding") && job.totalSeconds ? `${time(job.processedSeconds || 0)} processed of ${time(job.totalSeconds)}` : ""}</span><Button size="sm" variant="outline" onclick={() => stop(job.id)} disabled={stopping === job.id}>{stopping === job.id ? "Stopping…" : "Stop"}</Button></div>
+                        <progress class="w-full h-2 accent-primary" value={(job.stage === "analyzing" || job.stage === "encoding") ? job.progress : undefined} max="100"></progress>
+                    </div>
+                {:else if !initial}
+                    <div class="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                        <span>{file.duration <= 0 ? "Recording is still being captured or has no audio." : failed ? "Processing failed: " + failed.error : latest?.stage === "cancelled" ? "Processing stopped." : "Processing has not started."}</span>
+                        <Button size="sm" variant="outline" onclick={() => retry(file)} disabled={file.duration <= 0}><RotateCcw class="w-4 h-4 mr-2" /> Retry</Button>
+                    </div>
+                    {#if file.duration > 0}
+                        <div class="space-y-2 rounded-lg bg-background/40 p-3">
+                            <p class="text-xs text-muted-foreground">Original audio · {file.name}</p>
+                            <AudioPlayer src="/api/recordings/raw/{encodeURIComponent(file.name)}" duration={file.duration} />
+                            {#if failed && file.name.toLowerCase().endsWith(".wav")}
+                                <p class="text-xs text-muted-foreground break-all">{file.rawPushed ? "Pushed to cloud" : "Cloud destination"}: {file.rawCloudPath}</p>
+                                {#if !file.rawPushed}
+                                    <Button size="sm" variant="outline" onclick={() => push(file.name)} disabled={pushing === file.name}><Cloud class="w-4 h-4 mr-2" /> {pushing === file.name ? "Pushing…" : "Push original WAV to cloud"}</Button>
+                                {/if}
+                            {/if}
+                        </div>
+                    {/if}
+                {:else if failed && failed.autoPush && !initial.pushed}
+                    <p role="alert" class="text-xs text-destructive">Cloud push failed: {failed.error}. Check the cloud folder and processing logs.</p>
+                {/if}
+                {#each file.jobs.filter(j => !j.autoPush && j.stage === "failed") as failedTrim (failedTrim.id)}
+                    <p role="alert" class="text-xs text-destructive">Trim or cloud push failed: {failedTrim.error}</p>
+                {/each}
+                {#each file.jobs.filter(j => !j.autoPush && j.stage === "cancelled") as stoppedTrim (stoppedTrim.id)}
+                    <p class="text-xs text-muted-foreground">Trim stopped.</p>
+                {/each}
+                {#each file.exports as exportFile (exportFile.name)}
+                    <div class="flex flex-col xl:flex-row xl:items-center gap-3 rounded-lg bg-background/40 p-3">
+                        <div class="min-w-0 flex-1">
+                            <p class="text-xs font-medium text-white">{exportFile.name === initial?.name ? "Processed MP3" : "Trimmed MP3"}</p>
+                            <p class="text-xs text-muted-foreground">{size(exportFile.size)} · {exportFile.pushed ? "Pushed to cloud" : job?.output === exportFile.name && job.stage === "pushing" ? "Pushing to cloud" : "Waiting for automatic push"}</p>
+                            <p class="text-xs text-muted-foreground break-all" title={audio.storageLocation + "/" + exportFile.name}>Local: {audio.storageLocation}/{exportFile.name}</p>
+                            <p class="text-xs text-muted-foreground break-all" title={exportFile.cloudPath}>{exportFile.pushed ? "Cloud" : "Cloud destination"}: {exportFile.cloudPath}</p>
+                            {#if exportFile.pushed && exportFile.cloudPath !== exportFile.cloudTargetPath}
+                                <p class="text-xs text-muted-foreground">This existing cloud copy has an older filename.</p>
+                            {/if}
+                        </div>
+                        <div class="w-full xl:w-64"><AudioPlayer src="/api/recordings/raw/{encodeURIComponent(exportFile.name)}" duration={exportFile.duration} /></div>
+                    </div>
+                {/each}
+            </section>
+        {/each}
     </div>
 </Card>
 
-<!-- Push Dialog Modal -->
-{#if pushingFile}
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/90 backdrop-blur-sm animate-in fade-in duration-300">
-        <Card title="Cloud Backup" class="w-full max-w-lg glass border-primary/20 p-2">
-            <div class="flex items-center justify-between mb-8 p-4 border-b border-border/40">
-                <div class="flex items-center gap-3">
-                    <div class="p-2 bg-primary/20 rounded-lg">
-                        <Cloud class="w-5 h-5 text-primary" />
-                    </div>
-                    <div class="flex flex-col">
-                        <h2 class="text-lg font-bold text-white uppercase tracking-tight">Cloud Backup</h2>
-                        <span class="text-xxs font-black uppercase tracking-widest text-muted-foreground">Transferring session</span>
-                    </div>
-                </div>
-                <Button variant="ghost" size="icon" onclick={() => pushingFile = null}>
-                    <X class="w-5 h-5" />
-                </Button>
+{#if editing}
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm">
+        <Card title="" class="w-full max-w-xl glass border-primary/20">
+            <div class="flex items-center justify-between mb-5">
+                <div><h2 class="text-lg font-bold text-white">Trim recording</h2><p class="text-xs text-muted-foreground">Choose the part to keep, then create a new MP3.</p></div>
+                <Button variant="ghost" size="icon" aria-label="Close trim editor" onclick={() => editing = null}><X class="w-5 h-5" /></Button>
             </div>
-
-            <div class="space-y-8 p-4">
-                <div class="p-4 bg-primary/5 border border-primary/10 rounded-xl flex gap-3 text-xs text-muted-foreground leading-relaxed">
-                    <Info class="w-5 h-5 text-primary shrink-0" />
-                    <div>
-                        Source File: <span class="text-white font-bold">{pushingFile.name}</span>
-                    </div>
+            {@const ready = processed(editing)}
+            {#if ready}
+                <p class="text-xs text-muted-foreground mb-2">Editing processed MP3 · {time(ready.duration)}</p>
+                <div class="mb-5"><AudioPlayer bind:this={previewPlayer} bind:position={previewPosition} src="/api/recordings/raw/{encodeURIComponent(ready.name)}" duration={ready.duration} selectionEnd={parseTimecode(endText) ?? undefined} /></div>
+            {/if}
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div class="space-y-2">
+                    <label for="trim-start" class="text-xs text-muted-foreground">Start (mm:ss or hh:mm:ss)</label>
+                    <input id="trim-start" type="text" inputmode="numeric" bind:value={startText} class="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-white" />
+                    <Button variant="outline" size="sm" onclick={() => setBoundary("start")}>Use playhead</Button>
                 </div>
-
-                <div class="space-y-3">
-                    <label for="archive-filename" class="text-xxs font-black uppercase tracking-widest text-muted-foreground ml-1">Archive Filename</label>
-                    <input 
-                        id="archive-filename"
-                        bind:value={targetFilename}
-                        class="w-full bg-muted/50 border border-border rounded-lg px-4 py-3 font-mono text-sm text-white focus:ring-primary"
-                    />
-                </div>
-
-                <div class="flex gap-3 pt-4">
-                    <Button 
-                        variant="secondary" 
-                        class="flex-1"
-                        onclick={() => pushingFile = null}
-                    >
-                        Cancel
-                    </Button>
-                    <Button 
-                        class="flex-1"
-                        onclick={handlePush}
-                    >
-                        Execute Upload
-                    </Button>
+                <div class="space-y-2">
+                    <label for="trim-end" class="text-xs text-muted-foreground">End (mm:ss or hh:mm:ss)</label>
+                    <input id="trim-end" type="text" inputmode="numeric" bind:value={endText} class="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-white" />
+                    <Button variant="outline" size="sm" onclick={() => setBoundary("end")}>Use playhead</Button>
                 </div>
             </div>
+            <div class="flex items-center justify-between gap-3 mb-5">
+                <p class="text-xs text-muted-foreground">Resulting audio length: {parseTimecode(startText) !== null && parseTimecode(endText) !== null ? time(Math.max(0, (parseTimecode(endText) ?? 0) - (parseTimecode(startText) ?? 0))) : "—"}</p>
+                <div class="flex gap-2"><Button variant="outline" size="sm" onclick={() => { startText = "0:00"; endText = time(processed(editing!)?.duration ?? 0); }}>Reset</Button><Button variant="outline" size="sm" onclick={previewSelection}>Play selection</Button></div>
+            </div>
+            {#if error}<p role="alert" class="text-xs text-destructive mb-4">{error}</p>{/if}
+            <div class="flex justify-end gap-3"><Button variant="secondary" onclick={() => editing = null}>Cancel</Button><Button onclick={trim} disabled={busy}>{busy ? "Starting…" : "Create and push trimmed MP3"}</Button></div>
         </Card>
     </div>
 {/if}
-
-<style>
-    audio {
-        color-scheme: dark;
-    }
-</style>

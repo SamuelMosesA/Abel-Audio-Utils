@@ -80,6 +80,112 @@ Then edit `~/.config/abel/config.yaml`.
 3. **Access the UI**:
    Open `http://localhost:8080` (or your configured port).
 
+## Spec-Driven Development & AI Workflows (Spec Kit)
+
+This repository uses [GitHub Spec Kit](https://github.com/github/spec-kit) (`specify`) for specification-driven development, AI coding agent workflows (Claude Code, OpenAI Codex, Antigravity, etc.), and structured bug triage.
+
+### 1. Spec Kit Installation
+
+Install the `specify` CLI tool using `uv` (recommended) or `pipx`:
+
+```bash
+# Recommended (via uv)
+uv tool install specify-cli --from git+https://github.com/github/spec-kit.git
+
+# Alternative (via pipx)
+pipx install specify-cli
+
+# Verify installation
+specify --version
+```
+
+> **Note**: Ensure Python 3.11+ is installed and your tool binary path (e.g. `~/.local/bin`) is included in your `$PATH`.
+
+### 2. Project Initialization & Agent Setup
+
+#### Initializing in a Fresh Clone
+To initialize Spec Kit in this project for your preferred AI coding agent with the bug extension pre-configured (using `--force` to merge/overwrite in the existing repository without interactive prompts):
+
+```bash
+# For Claude Code
+specify init --here --force --integration claude --extension bug
+
+# For OpenAI Codex CLI
+specify init --here --force --integration codex --extension bug
+
+# For Antigravity (AGY)
+specify init --here --force --integration agy --extension bug
+```
+
+#### Adding Agent Integrations to an Existing Project
+If Spec Kit is already initialized in your working copy, you can install or switch between agent integrations:
+
+```bash
+# Install Claude Code integration
+specify integration install claude
+
+# Install Codex CLI integration
+specify integration install codex
+
+# Install Antigravity integration
+specify integration install agy
+
+# List installed and available integrations
+specify integration list
+
+# Switch active integration
+specify integration switch <claude|codex|agy>
+```
+
+### 3. Adding & Managing the Bug Extension
+
+The **Bug Triage Workflow Extension** provides a standardized 3-stage workflow (`assess`, `fix`, `test`) where reports are stored under `.specify/bugs/<slug>/`.
+
+To install and enable the bug extension:
+
+```bash
+# Install the bundled bug extension
+specify extension add bug
+
+# Verify installed extensions
+specify extension list
+```
+
+To disable or re-enable the extension:
+```bash
+specify extension disable bug
+specify extension enable bug
+```
+
+### 4. Bug Triage Workflow
+
+Coding agents (Claude Code, Codex, Antigravity, etc.) can drive the 3-step bug triage lifecycle:
+
+1. **Assess a Bug**:
+   Analyze a bug report from an issue URL or error description, locate suspected code paths, and propose a remediation plan without modifying source code:
+   ```text
+   /speckit.bug.assess "Issue description or stack trace" slug=<kebab-case-slug>
+   # or with an issue URL:
+   /speckit.bug.assess https://github.com/SamuelMosesA/Abel-Audio-Utils/issues/123 slug=<slug>
+   ```
+   *(Generates `.specify/bugs/<slug>/assessment.md`)*
+
+2. **Fix the Bug**:
+   Apply the proposed remediation from the assessment:
+   ```text
+   /speckit.bug.fix slug=<slug>
+   ```
+   *(Generates `.specify/bugs/<slug>/fix.md`)*
+
+3. **Validate & Test**:
+   Run reproductions and automated tests to verify the fix:
+   ```text
+   /speckit.bug.test slug=<slug>
+   ```
+   *(Generates `.specify/bugs/<slug>/test.md`)*
+
+*(Note: Depending on your agent and integration, slash commands can also be invoked with hyphens, e.g. `/speckit-bug-assess`.)*
+
 ## Project Structure
 
 - `src/backend/main.go` - Application entry point with configuration fallback path resolution.
@@ -92,3 +198,4 @@ Then edit `~/.config/abel/config.yaml`.
 ## License
 
 MIT
+

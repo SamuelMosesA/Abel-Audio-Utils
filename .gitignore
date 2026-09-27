@@ -1,2 +1,4 @@
 /src/backend/static/
 /coverage.out
+# curl cookie jars from manual testing
+cookie*.txt

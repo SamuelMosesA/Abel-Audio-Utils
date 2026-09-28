@@ -31,11 +31,25 @@ func FinalizeWavHeader(f *os.File, ch uint16, s int64, sampleRate int) error {
 	if f == nil {
 		return nil
 	}
-	dataSize := uint32(s * int64(ch) * wavBytesPerSample)
+	if s < 0 {
+		s = 0
+	}
+	if ch == 0 {
+		ch = 2
+	}
+	totalBytes := s * int64(ch) * wavBytesPerSample
+	const maxWavDataSize = uint32(0xFFFFFFFF - 36)
+	var dataSize uint32
+	if totalBytes > int64(maxWavDataSize) {
+		dataSize = maxWavDataSize
+	} else {
+		dataSize = uint32(totalBytes)
+	}
 	return writeWavHeader(f, ch, dataSize, sampleRate)
 }
 
-func writeWavHeader(f *os.File, ch uint16, dataSize uint32, sampleRate int) error {
+// GenerateWavHeader constructs the 44-byte standard PCM WAV header in memory.
+func GenerateWavHeader(ch uint16, dataSize uint32, sampleRate int) [wavHeaderSize]byte {
 	if ch == 0 {
 		ch = 2
 	}
@@ -46,62 +60,44 @@ func writeWavHeader(f *os.File, ch uint16, dataSize uint32, sampleRate int) erro
 	byteRate := uint32(sampleRate) * uint32(ch) * wavBytesPerSample
 	blockAlign := uint16(ch * wavBytesPerSample)
 
-	// Seek to start and write the complete WAV header
-	// WAV File Format (Little Endian):
-	//   Offset  Size  Field          Description
-	//   ------  ----  -----          -----------
-	//   0       4     "RIFF"         Chunk ID (marks this as RIFF file)
-	//   4       4     FileSize-8     File size minus 8 bytes (for RIFF header itself)
-	//   8       4     "WAVE"         Format identifier (always "WAVE" for audio)
-	//   12      4     "fmt "         Subchunk1 ID (format chunk, note the space)
-	//   16      4     16             Subchunk1 Size (16 bytes for PCM)
-	//   20      2     1              Audio Format (1 = PCM, others = compressed)
-	//   22      2     Channels       Number of audio channels (1=mono, 2=stereo)
-	//   24      4     SampleRate     Sample rate in Hz (e.g., 48000, 44100)
-	//   28      4     ByteRate       SampleRate * Channels * BytesPerSample
-	//   32      2     BlockAlign     Channels * BytesPerSample (frame size)
-	//   34      2     BitsPerSample  Bits per sample (16 for int16)
-	//   36      4     "data"         Data chunk ID (marks audio data section)
-	//   40      4     DataSize       Number of bytes of audio data
-	//   44      ...   Audio Data     Raw PCM samples follow
+	var header [wavHeaderSize]byte
+
+	// 0..3 "RIFF"
+	copy(header[0:4], "RIFF")
+	// 4..7 FileSize - 8 = 36 + dataSize
+	binary.LittleEndian.PutUint32(header[4:8], 36+dataSize)
+	// 8..11 "WAVE"
+	copy(header[8:12], "WAVE")
+	// 12..15 "fmt "
+	copy(header[12:16], "fmt ")
+	// 16..19 Subchunk1Size = 16
+	binary.LittleEndian.PutUint32(header[16:20], 16)
+	// 20..21 AudioFormat = 1 (PCM)
+	binary.LittleEndian.PutUint16(header[20:22], 1)
+	// 22..23 NumChannels
+	binary.LittleEndian.PutUint16(header[22:24], ch)
+	// 24..27 SampleRate
+	binary.LittleEndian.PutUint32(header[24:28], uint32(sampleRate))
+	// 28..31 ByteRate
+	binary.LittleEndian.PutUint32(header[28:32], byteRate)
+	// 32..33 BlockAlign
+	binary.LittleEndian.PutUint16(header[32:34], blockAlign)
+	// 34..35 BitsPerSample = 16
+	binary.LittleEndian.PutUint16(header[34:36], uint16(wavBitsPerSample))
+	// 36..39 "data"
+	copy(header[36:40], "data")
+	// 40..43 DataSize
+	binary.LittleEndian.PutUint32(header[40:44], dataSize)
+
+	return header
+}
+
+func writeWavHeader(f *os.File, ch uint16, dataSize uint32, sampleRate int) error {
+	header := GenerateWavHeader(ch, dataSize, sampleRate)
+
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	if _, err := f.Write([]byte{'R', 'I', 'F', 'F'}); err != nil {
-		return err
-	}
-	if err := binary.Write(f, binary.LittleEndian, uint32(36+dataSize)); err != nil {
-		return err
-	}
-	if _, err := f.Write([]byte{'W', 'A', 'V', 'E'}); err != nil {
-		return err
-	}
-	if _, err := f.Write([]byte{'f', 'm', 't', ' '}); err != nil {
-		return err
-	}
-	if err := binary.Write(f, binary.LittleEndian, uint32(16)); err != nil {
-		return err
-	}
-	if err := binary.Write(f, binary.LittleEndian, uint16(1)); err != nil {
-		return err
-	}
-	if err := binary.Write(f, binary.LittleEndian, ch); err != nil {
-		return err
-	}
-	if err := binary.Write(f, binary.LittleEndian, uint32(sampleRate)); err != nil {
-		return err
-	}
-	if err := binary.Write(f, binary.LittleEndian, byteRate); err != nil {
-		return err
-	}
-	if err := binary.Write(f, binary.LittleEndian, blockAlign); err != nil {
-		return err
-	}
-	if err := binary.Write(f, binary.LittleEndian, uint16(wavBitsPerSample)); err != nil {
-		return err
-	}
-	if _, err := f.Write([]byte{'d', 'a', 't', 'a'}); err != nil {
-		return err
-	}
-	return binary.Write(f, binary.LittleEndian, dataSize)
+	_, err := f.Write(header[:])
+	return err
 }

@@ -167,6 +167,12 @@ func StartAudioEngine(streamer AudioStreamer, appState *state.AppState, cfg *con
 			select {
 			case recordChan <- stereoChunk:
 			default:
+				if appState.IsRecording() {
+					logger.Warn("Audio engine dropped recording chunk: buffer full")
+					if telemetry.DroppedAudioChunks != nil {
+						telemetry.DroppedAudioChunks.Add(context.Background(), 1)
+					}
+				}
 			}
 			select {
 			case playbackChan <- stereoChunk:

@@ -1,6 +1,7 @@
 package state
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -51,4 +52,61 @@ func TestBroadcastHubRobustness(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Update blocked on full channel")
 	}
+}
+
+func TestEngineStateOperations(t *testing.T) {
+	appState := NewAppState("", "")
+	engine := appState.Engine()
+
+	// Initial state
+	assert.Nil(t, engine.File())
+	assert.Equal(t, int64(0), engine.SamplesWrote())
+	assert.False(t, engine.IsRunning())
+
+	// Set running
+	engine.SetRunning(true)
+	assert.True(t, engine.IsRunning())
+
+	// WriteWithFile with no file
+	n, err := engine.WriteWithFile(func(f *os.File) (int, error) {
+		return 10, nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 0, n)
+	assert.Equal(t, int64(0), engine.SamplesWrote())
+
+	// Set file and write
+	tmpFile, err := os.CreateTemp("", "test_engine_state_*.raw")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	engine.SetFile(tmpFile)
+	assert.Equal(t, tmpFile, engine.File())
+
+	n, err = engine.WriteWithFile(func(f *os.File) (int, error) {
+		_, writeErr := f.Write([]byte{1, 2, 3, 4})
+		return 2, writeErr
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 2, n)
+	assert.Equal(t, int64(2), engine.SamplesWrote())
+
+	// TakeFile
+	takenFile, samples := engine.TakeFile()
+	assert.Equal(t, tmpFile, takenFile)
+	assert.Equal(t, int64(2), samples)
+	assert.Nil(t, engine.File())
+
+	// Subsequent WriteWithFile should safely no-op
+	n, err = engine.WriteWithFile(func(f *os.File) (int, error) {
+		return 5, nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 0, n)
+	assert.Equal(t, int64(2), engine.SamplesWrote())
+
+	// Reset samples
+	engine.ResetSamples()
+	assert.Equal(t, int64(0), engine.SamplesWrote())
 }

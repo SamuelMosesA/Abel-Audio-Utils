@@ -11,8 +11,9 @@ var (
 	AudioLoopLatency    metric.Float64Histogram
 
 	// Counters
-	DroppedConnections  metric.Int64Counter
-	AITokensConsumed    metric.Int64Counter
+	DroppedConnections    metric.Int64Counter
+	DroppedAudioChunks    metric.Int64Counter
+	AITokensConsumed      metric.Int64Counter
 	ProcessedChunks     metric.Int64Counter
 	SubtitlesSent       metric.Int64Counter
 	AIEventsReceived     metric.Int64Counter
@@ -43,6 +44,14 @@ func InitMetrics() error {
 	DroppedConnections, err = meter.Int64Counter("dropped_connections_total",
 		metric.WithDescription("Total number of dropped client connections (e.g. websocket failures)"),
 		metric.WithUnit("{connections}"),
+	)
+	if err != nil {
+		return err
+	}
+
+	DroppedAudioChunks, err = meter.Int64Counter("dropped_audio_chunks_total",
+		metric.WithDescription("Total number of audio chunks dropped due to full consumer channels"),
+		metric.WithUnit("{chunks}"),
 	)
 	if err != nil {
 		return err

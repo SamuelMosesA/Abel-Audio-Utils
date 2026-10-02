@@ -95,9 +95,8 @@ func CreateRecording(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 					return
 				}
 
-				file := appState.Engine().File()
-				appState.Engine().SetFile(nil)
-				samplesWrote := appState.Engine().SamplesWrote()
+				file, samplesWrote := appState.Engine().TakeFile()
+				s.SetRecording(false)
 
 				if file == nil {
 					err = fmt.Errorf("no file to finalize")
@@ -115,7 +114,6 @@ func CreateRecording(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 					return
 				}
 
-				s.SetRecording(false)
 				logger.Info("Recording stopped",
 					slog.String("recording.file", filename),
 					slog.Int("recording.samples", int(samplesWrote)),

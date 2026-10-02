@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"log/slog"
+	"os"
 	"time"
 )
 
@@ -13,65 +15,62 @@ import (
 //
 // Data Flow:
 // 1. Receives float32 audio chunks from recordChan (stereo interleaved: [L, R, L, R, ...])
-// 2. Converts each float32 sample to int16:
-//   - float32 range: -1.0 to +1.0
-//   - int16 range: -32768 to +32767
-//   - Conversion: float32 * 32767 ≈ int16
-//
-// 3. Writes int16 pairs (stereo samples) as little-endian bytes to state.File
-// 4. Tracks total samples written in state.SamplesWrote
-//
-// Data Format:
-//
-//	Input (float32): 32-bit IEEE 754 floating point [-1.0 to 1.0]
-//	Output (int16): 16-bit signed integer [-32768 to 32767]
-//	Encoding: Little Endian (LSB first, native for x86/ARM)
-//	Layout: Stereo interleaved [Left, Right, Left, Right, ...]
-//
-// Example:
-//
-//	Input chunk: [0.5, -0.3, 0.1, 0.2]
-//	Converted: [16384, -9831, 3277, 6554] (approx)
-//	On disk (hex): 00 40 59 D8 0C 0C 4A 19
+// 2. Converts each float32 sample to int16 (clamped [-1.0, 1.0])
+// 3. Batches converted int16 pairs into a byte buffer (Little Endian)
+// 4. Writes batched bytes via appState.Engine().WriteWithFile to protect against concurrent file closures
+// 5. Tracks total samples written safely under mutex
 func StartStorageWorker(appState *state.AppState, recordChan <-chan []float32) {
+	logger := slog.With("component", "storage")
 	go func() {
 		for chunk := range recordChan {
-			if !appState.IsRecording() || appState.Engine().File() == nil {
+			if !appState.IsRecording() {
 				continue
 			}
 
 			startTime := time.Now()
-			n, err := WriteAudio(appState.Engine().File(), chunk)
-			if err == nil {
-				appState.Engine().AddSamples(int64(n))
+			n, err := appState.Engine().WriteWithFile(func(f *os.File) (int, error) {
+				return WriteAudio(f, chunk)
+			})
+			if err != nil {
+				logger.Error("Failed to write audio chunk", slog.Any("error", err))
 			}
-			if telemetry.RecordingLatency != nil {
+			if n > 0 && telemetry.RecordingLatency != nil {
 				telemetry.RecordingLatency.Record(context.Background(), float64(time.Since(startTime).Nanoseconds())/1e6)
 			}
 		}
 	}()
 }
 
-// WriteAudio converts float32 stereo chunks to int16 and writes them to the provided writer.
+// WriteAudio converts float32 stereo chunks to int16 and writes them to the provided writer in a single batched buffer write.
 // Returns the number of stereo samples (pairs) written.
 func WriteAudio(w io.Writer, chunk []float32) (int, error) {
-	if len(chunk) == 0 {
+	numPairs := len(chunk) / 2
+	if numPairs == 0 {
 		return 0, nil
 	}
 
-	// Process pairs of float32 samples (stereo)
-	for i := 0; i < len(chunk)-1; i += 2 {
-		sL, sR := chunk[i], chunk[i+1]
-		// Convert float32 [-1.0, 1.0] to int16 [-32768, 32767]
-		iL, iR := int16(sL*32767), int16(sR*32767)
-		// Write as little-endian int16 values
-		if err := binary.Write(w, binary.LittleEndian, iL); err != nil {
-			return i / 2, err
+	buf := make([]byte, numPairs*4)
+	for i := 0; i < numPairs; i++ {
+		sL, sR := chunk[i*2], chunk[i*2+1]
+		if sL > 1.0 {
+			sL = 1.0
+		} else if sL < -1.0 {
+			sL = -1.0
 		}
-		if err := binary.Write(w, binary.LittleEndian, iR); err != nil {
-			return i / 2, err
+		if sR > 1.0 {
+			sR = 1.0
+		} else if sR < -1.0 {
+			sR = -1.0
 		}
+
+		iL := int16(sL * 32767)
+		iR := int16(sR * 32767)
+
+		binary.LittleEndian.PutUint16(buf[i*4:], uint16(iL))
+		binary.LittleEndian.PutUint16(buf[i*4+2:], uint16(iR))
 	}
-	return len(chunk) / 2, nil
+
+	nBytes, err := w.Write(buf)
+	return nBytes / 4, err
 }
 

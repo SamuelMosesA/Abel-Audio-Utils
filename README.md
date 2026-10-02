@@ -23,8 +23,8 @@ Abel (anti-babel) is a high-performance, web-based audio recording, AI translati
 - **PortAudio**: Development headers for audio I/O
   - macOS: `brew install portaudio`
   - Linux: `sudo apt-get install portaudio19-dev`
-- **FFmpeg and FFprobe**: Runtime AAC/HLS packaging and recording processing, including an FFmpeg build with `libmp3lame`, `dynaudnorm`, and `loudnorm`
-  - macOS: `brew install ffmpeg`
+- **FFmpeg and FFprobe**: Runtime AAC/HLS packaging and recording processing. Requires the `libmp3lame` encoder and the `dynaudnorm` and `loudnorm` filters.
+  - macOS: `brew install ffmpeg` includes FFprobe and all required encoders and filters; no custom build is needed.
   - Linux: `sudo apt-get install ffmpeg`
 
 ## Installation & Setup

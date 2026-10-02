@@ -7,8 +7,9 @@ Abel (anti-babel) is a high-performance, web-based audio recording, AI translati
 - **Real-time Monitoring**: Visual feedback via high-performance dB meters and waveforms.
 - **Stereo Recording**: Support for dual-channel recording with configurable routing.
 - **Digital Gain Boost**: Adjust input levels digitally before recording.
-- **File Management**: List, play back, and manage your recordings directly from the browser.
-- **Cloud Integration**: Push recordings to a configured cloud drive location with a click.
+- **Recording Processing**: On stop or import, trim edge silence, normalize, and export a mono MP3. The admin library shows FFmpeg progress and supports optional manual trimming.
+- **File Management**: Play processed MP3s and create revised trims from the browser. Original recordings and imported audio remain in storage.
+- **Cloud Integration**: Automatically push the initial and manually trimmed MP3s to the configured cloud drive directory, using readable date-based filenames and numbered copies when names collide.
 - **Multi-Client Sync**: WebSocket-based state synchronization across multiple open tabs.
 - **AI Live Subtitles & Translation**: Real-time translation and transcription via **OpenAI Realtime API** with Server-Sent Events (SSE) subtitle delivery.
 - **Centralized Telemetry**: Full OpenTelemetry OTLP integration emitting structured application logs (`slog` log handler) and performance metrics (loop latency, write latency, active/dropped connections, AI token consumption).
@@ -22,8 +23,8 @@ Abel (anti-babel) is a high-performance, web-based audio recording, AI translati
 - **PortAudio**: Development headers for audio I/O
   - macOS: `brew install portaudio`
   - Linux: `sudo apt-get install portaudio19-dev`
-- **FFmpeg**: Runtime AAC/HLS packaging for browser-compatible live audio
-  - macOS: `brew install ffmpeg`
+- **FFmpeg and FFprobe**: Runtime AAC/HLS packaging and recording processing. Requires the `libmp3lame` encoder and the `dynaudnorm` and `loudnorm` filters.
+  - macOS: `brew install ffmpeg` includes FFprobe and all required encoders and filters; no custom build is needed.
   - Linux: `sudo apt-get install ffmpeg`
 
 ## Installation & Setup
@@ -79,6 +80,12 @@ Then edit `~/.config/abel/config.yaml`.
 
 3. **Access the UI**:
    Open `http://localhost:8080` (or your configured port).
+
+### Processing recordings
+
+Stopping a recording queues background processing. You can also import WAV, MP3, M4A, FLAC, AAC, or OGG files from your device with **Choose files**, drag and drop, or clipboard paste in the admin recordings list. Imports use the same automatic processing and push flow. Abel conservatively trims silence at the beginning and end, preserves pauses in speech, applies the same cleanup chain as [process-sermon](https://github.com/vavilovm/process-sermon), and writes a `-processed.mp3` export beside the source audio. Once complete, it pushes the MP3 to `cloud_drive_location` with a date-based name. Abel also checks for generated MP3s missing from cloud at startup and every minute, then pushes them automatically. The admin list shows upload and processing progress, cloud paths, push status, and failures. Use **Stop** to cancel queued or running processing. If processing a WAV fails, the original WAV can be pushed from the admin library.
+
+To make a manual cut, open **Trim** after the processed MP3 is ready. Enter start and end timecodes in `mm:ss` or `hh:mm:ss`, or use the current playback position. **Create and push trimmed MP3** creates a revised export and pushes it automatically. Cloud names start with the recording date and time: the initial copy is `YYYY-MM-DD_HH-mm-ss.mp3`, and a cut is `YYYY-MM-DD_HH-mm-ss-trimmed.mp3`. If a name is taken, Abel appends `-2`, `-3`, and so on. The assigned names are recorded in `.abel-cloud-names.json` in the recordings folder so retries and restarts keep the same destination. Existing cloud copies retain their older names. The original audio remains in storage for future revisions. Processing jobs are kept in memory; finished MP3s and their cloud copies are discovered from disk after a restart.
 
 ## Spec-Driven Development & AI Workflows (Spec Kit)
 
@@ -198,4 +205,3 @@ Coding agents (Claude Code, Codex, Antigravity, etc.) can drive the 3-step bug t
 ## License
 
 MIT
-

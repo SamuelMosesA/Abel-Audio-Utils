@@ -3,6 +3,7 @@ package web
 import (
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
+	"sync"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -10,6 +11,10 @@ import (
 )
 
 func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
+	return setupTestRouterWithProcessor(stateObj, cfg, NewRecordingProcessor(cfg))
+}
+
+func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, processor *RecordingProcessor) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
 	store := cookie.NewStore([]byte("secret"))
@@ -30,7 +35,7 @@ func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
 	api := r.Group("/api")
 	{
 		api.POST("/auth/session", LoginHandler(cfg, stateObj))
-		RegisterAdminRoutes(api, stateObj, cfg)
+		RegisterAdminRoutes(api, stateObj, cfg, processor)
 		api.GET("/recordings", GetRecordingStatus(stateObj))
 		api.GET("/ai/streams", GetAIStreamsStatus(stateObj))
 		api.GET("/system/connection", GetSystemConnection(cfg))
@@ -38,27 +43,45 @@ func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
 	r.GET("/stream", StreamHandler())
 	r.GET("/subtitles/:lang", SubtitlesHandler(stateObj, cfg))
 	r.GET("/ws", NewWSHandler(stateObj, cfg))
-	
+
 	return r
 }
 
 type MockTranslator struct {
 	state.Translator
+	mu           sync.Mutex
 	subtitleChan chan string
 }
 
-func (m *MockTranslator) SetEnabled(enabled bool) {}
+func (m *MockTranslator) SetEnabled(enabled bool)               {}
 func (m *MockTranslator) GetChannel(lang string) chan []float32 { return nil }
 func (m *MockTranslator) ListSessions() []state.SessionInfo {
 	return []state.SessionInfo{{Language: "en"}}
 }
 func (m *MockTranslator) GetSubtitles(lang string) (chan string, func()) {
+	m.mu.Lock()
 	m.subtitleChan = make(chan string, 10)
-	return m.subtitleChan, func() { if m.subtitleChan != nil { close(m.subtitleChan); m.subtitleChan = nil } }
+	channel := m.subtitleChan
+	m.mu.Unlock()
+	return channel, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.subtitleChan != nil {
+			close(m.subtitleChan)
+			m.subtitleChan = nil
+		}
+	}
+}
+func (m *MockTranslator) SendSubtitle(value string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.subtitleChan != nil {
+		m.subtitleChan <- value
+	}
 }
 func (m *MockTranslator) StopSession(lang string, subs bool) {}
-func (m *MockTranslator) CloseAll() {}
-func (m *MockTranslator) PushAudio(samples []float32) {}
-func (m *MockTranslator) SetOnStateChange(fn func()) {}
+func (m *MockTranslator) CloseAll()                          {}
+func (m *MockTranslator) PushAudio(samples []float32)        {}
+func (m *MockTranslator) SetOnStateChange(fn func())         {}
 
 var testCfg = &config.Config{}

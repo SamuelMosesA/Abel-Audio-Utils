@@ -52,9 +52,7 @@ func TestSubtitlesHandler(t *testing.T) {
 	go router.ServeHTTP(w, req)
 
 	time.Sleep(100 * time.Millisecond)
-	if mockTranslator.subtitleChan != nil {
-		mockTranslator.subtitleChan <- "Hello"
-	}
+	mockTranslator.SendSubtitle("Hello")
 	time.Sleep(100 * time.Millisecond)
 	cancel()
 }

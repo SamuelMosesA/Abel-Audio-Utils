@@ -1,9 +1,9 @@
 package web
 
 import (
+	"abel/src/backend/lib/audioengine"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
-	"abel/src/backend/lib/audioengine"
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
@@ -59,11 +59,11 @@ func TestListRecordingFiles(t *testing.T) {
 	t.Run("Empty Directory", func(t *testing.T) {
 		emptyDir, _ := os.MkdirTemp("", "empty_*")
 		defer os.RemoveAll(emptyDir)
-		cfg.StorageLocation = emptyDir
+		emptyRouter := setupTestRouter(appState, &config.Config{StorageLocation: emptyDir})
 		req, _ := http.NewRequest("GET", "/api/recordings/files", nil)
 		req.Header.Set("X-Test-Auth", "true")
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+		emptyRouter.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
@@ -75,7 +75,8 @@ func TestCreateRecordingWritesValidWavHeader(t *testing.T) {
 
 	appState := state.NewAppState(tmpDir, "")
 	cfg := &config.Config{SampleRate: 44100, StorageLocation: tmpDir}
-	router := setupTestRouter(appState, cfg)
+	processor := NewRecordingProcessor(cfg)
+	router := setupTestRouterWithProcessor(appState, cfg, processor)
 
 	startBody, _ := json.Marshal(map[string]string{"action": "start"})
 	startReq, _ := http.NewRequest("POST", "/api/recordings", bytes.NewBuffer(startBody))
@@ -100,6 +101,25 @@ func TestCreateRecordingWritesValidWavHeader(t *testing.T) {
 	router.ServeHTTP(stopResp, stopReq)
 
 	assert.Equal(t, http.StatusOK, stopResp.Code)
+	var stopPayload map[string]interface{}
+	assert.NoError(t, json.Unmarshal(stopResp.Body.Bytes(), &stopPayload))
+	assert.NotEmpty(t, stopPayload["jobId"])
+	jobID, ok := stopPayload["jobId"].(string)
+	assert.True(t, ok)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		processor.mu.RLock()
+		job := processor.jobs[jobID]
+		processor.mu.RUnlock()
+		if job.Stage == "failed" || job.Stage == "completed" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	processor.mu.RLock()
+	finalStage := processor.jobs[jobID].Stage
+	processor.mu.RUnlock()
+	assert.Contains(t, []string{"failed", "completed"}, finalStage)
 
 	recordingPath := filepath.Join(tmpDir, startPayload["file"])
 	data, err := os.ReadFile(recordingPath)
@@ -123,13 +143,14 @@ func TestPushRecordingToCloud(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "test_push_*")
 	defer os.RemoveAll(tmpDir)
 	os.WriteFile(tmpDir+"/rec.wav", []byte("data"), 0644)
+	os.WriteFile(tmpDir+"/rec-processed.mp3", []byte("mp3 data"), 0644)
 
 	appState := state.NewAppState("", "")
 	cfg := &config.Config{StorageLocation: tmpDir, CloudDriveLocation: tmpDir + "/cloud"}
 	os.Mkdir(cfg.CloudDriveLocation, 0755)
 
 	router := setupTestRouter(appState, cfg)
-	body := map[string]interface{}{"source": "rec.wav", "target": "pushed.wav"}
+	body := map[string]interface{}{"source": "rec-processed.mp3"}
 	jsonBody, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", "/api/recordings/push", bytes.NewBuffer(jsonBody))
 	req.Header.Set("X-Test-Auth", "true")
@@ -137,6 +158,19 @@ func TestPushRecordingToCloud(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	info, err := os.Stat(filepath.Join(tmpDir, "rec.wav"))
+	assert.NoError(t, err)
+	data, err := os.ReadFile(filepath.Join(cfg.CloudDriveLocation, cloudFilename("rec.wav", "rec-processed.mp3", info.ModTime())))
+	assert.NoError(t, err)
+	assert.Equal(t, "mp3 data", string(data))
+
+	body["source"] = "../rec.wav"
+	jsonBody, _ = json.Marshal(body)
+	req, _ = http.NewRequest("POST", "/api/recordings/push", bytes.NewBuffer(jsonBody))
+	req.Header.Set("X-Test-Auth", "true")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestCreateRecordingWithActiveStorageWorker(t *testing.T) {

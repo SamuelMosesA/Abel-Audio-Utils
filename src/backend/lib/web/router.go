@@ -19,6 +19,7 @@ import (
 )
 
 func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audioengine.HLSPublisher, staticFiles embed.FS) *gin.Engine {
+	processor := NewRecordingProcessor(cfg)
 	// Switch from default to release mode by default, standard logger in gin is noisy
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -141,7 +142,7 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 		api.POST("/telemetry/errors", ErrorLogHandler())
 
 		// Admin/Protected routes (session authenticated)
-		RegisterAdminRoutes(api, appState, cfg)
+		RegisterAdminRoutes(api, appState, cfg, processor)
 	}
 
 	r.GET("/ws", NewWSHandler(appState, cfg))
@@ -149,16 +150,20 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 	return r
 }
 
-func RegisterAdminRoutes(r *gin.RouterGroup, appState *state.AppState, cfg *config.Config) {
+func RegisterAdminRoutes(r *gin.RouterGroup, appState *state.AppState, cfg *config.Config, processor *RecordingProcessor) {
 	r.Use(SessionAuthMiddleware())
 	{
 		r.PATCH("/audio/config", UpdateAudioConfig(appState, cfg))
 		r.POST("/audio/restart", RestartAudioEngine(appState, cfg))
-		r.POST("/recordings", CreateRecording(appState, cfg))
+		r.POST("/recordings", CreateRecording(appState, cfg, processor))
 		r.POST("/ai/streams", UpdateAIStreams(appState, cfg))
 		r.GET("/system/changelog", ChangeLogHandler(appState))
 		r.GET("/recordings/files", ListRecordingFiles(cfg))
-		r.POST("/recordings/push", PushRecordingToCloud(cfg))
+		r.GET("/recordings/library", ListRecordingLibrary(processor))
+		r.POST("/recordings/upload", UploadRecording(processor))
+		r.POST("/recordings/process", ProcessRecording(processor))
+		r.POST("/recordings/process/cancel", CancelRecordingProcessing(processor))
+		r.POST("/recordings/push", PushRecordingToCloud(processor))
 		r.StaticFS("/recordings/raw", http.Dir(cfg.StorageLocation))
 	}
 }

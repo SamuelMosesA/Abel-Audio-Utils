@@ -89,11 +89,14 @@ export class AudioStore {
 
     async toggleRecording() {
         const action = this.isRecording ? "stop" : "start";
-        await fetchWithSync("/api/recordings", {
+        const res = await fetchWithSync("/api/recordings", {
             method: "POST",
             body: JSON.stringify({ action })
         });
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload.error || "Could not control recording");
         await this.sync();
+        return payload as { processingError?: string; jobId?: string };
     }
 }
 
@@ -318,44 +321,129 @@ export class UIStore {
 
 import { AudioVisuals } from "./audioVisuals.svelte";
 
-export interface RecordedFile {
+export interface ProcessingJob {
+    id: string;
+    source: string;
+    output: string;
+    stage: "queued" | "analyzing" | "encoding" | "pushing" | "completed" | "failed" | "cancelled";
+    progress: number;
+    processedSeconds: number;
+    totalSeconds: number;
+    error?: string;
+    autoPush: boolean;
+}
+
+export interface RecordingExport {
     name: string;
     size: number;
     modTime: string;
+    pushed: boolean;
+    cloudPath: string;
+    cloudTargetPath: string;
+    duration: number;
+}
+
+export interface RecordedFile {
+    name: string;
+    display: string;
+    size: number;
+    modTime: string;
+    duration: number;
+    rawCloudPath: string;
+    rawPushed: boolean;
+    exports: RecordingExport[];
+    jobs: ProcessingJob[];
 }
 
 export class FileStore {
     recordedFiles = $state<RecordedFile[]>([]);
-
-    constructor() {
-        if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
-            this.fetchFiles();
-            setInterval(() => this.fetchFiles(), 10000);
-        }
-    }
+    loadError = $state("");
 
     async fetchFiles() {
         try {
-            const res = await fetch("/api/recordings/files", { credentials: "include" });
+            const res = await fetch("/api/recordings/library", { credentials: "include" });
             if (res.ok) {
                 const files = await res.json();
                 files.sort((a: RecordedFile, b: RecordedFile) => new Date(b.modTime).getTime() - new Date(a.modTime).getTime());
                 this.recordedFiles = files;
+                this.loadError = "";
+            } else {
+                this.loadError = "Could not load recordings (HTTP " + res.status + ")";
             }
         } catch (e) {
             console.error("Error fetching files", e);
+            this.loadError = "Could not connect to the recordings library";
         }
     }
 
-    async pushToCloud(source: string, target: string) {
+    async process(source: string, startSeconds: number, endSeconds: number, automatic = false) {
+        try {
+            const res = await fetch("/api/recordings/process", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ source, startSeconds, endSeconds, automatic }),
+                credentials: "include"
+            });
+            if (res.ok) { await this.fetchFiles(); return { success: true }; }
+            const body = await res.json();
+            return { success: false, error: body.error || res.statusText };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    }
+
+    upload(file: File, onProgress: (percent: number) => void): Promise<{ success: boolean; error?: string; processingError?: string }> {
+        return new Promise(resolve => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "/api/recordings/upload");
+            xhr.withCredentials = true;
+            xhr.upload.onprogress = event => {
+                if (event.lengthComputable) onProgress(Math.round(event.loaded / event.total * 100));
+            };
+            xhr.onerror = () => resolve({ success: false, error: "Upload connection failed" });
+            xhr.onload = async () => {
+                let response: { error?: string; processingError?: string } = {};
+                try { response = JSON.parse(xhr.responseText); } catch { /* Unexpected server response. */ }
+                if (xhr.status === 201) {
+                    await this.fetchFiles();
+                    resolve({ success: true, processingError: response.processingError });
+                } else {
+                    resolve({ success: false, error: response.error || "Upload failed (HTTP " + xhr.status + ")" });
+                }
+            };
+            const form = new FormData();
+            form.append("file", file);
+            xhr.send(form);
+        });
+    }
+
+    async pushToCloud(source: string) {
         try {
             const res = await fetch("/api/recordings/push", {
                 method: "POST",
-                body: JSON.stringify({ source, target }),
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ source }),
                 credentials: "include"
             });
-            if (res.ok) return { success: true };
-            return { success: false, error: await res.text() };
+            if (res.ok) { await this.fetchFiles(); return { success: true }; }
+            const body = await res.json();
+            return { success: false, error: body.error || res.statusText };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    }
+
+    async cancelProcessing(id: string) {
+        try {
+            const res = await fetch("/api/recordings/process/cancel", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id }),
+                credentials: "include"
+            });
+            if (res.ok) { await this.fetchFiles(); return { success: true }; }
+            const body = await res.json();
+            return { success: false, error: body.error || res.statusText };
         } catch (e) {
             return { success: false, error: String(e) };
         }

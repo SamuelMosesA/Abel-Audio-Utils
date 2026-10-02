@@ -153,6 +153,7 @@ func RegisterAdminRoutes(r *gin.RouterGroup, appState *state.AppState, cfg *conf
 	r.Use(SessionAuthMiddleware())
 	{
 		r.PATCH("/audio/config", UpdateAudioConfig(appState, cfg))
+		r.POST("/audio/restart", RestartAudioEngine(appState, cfg))
 		r.POST("/recordings", CreateRecording(appState, cfg))
 		r.POST("/ai/streams", UpdateAIStreams(appState, cfg))
 		r.GET("/system/changelog", ChangeLogHandler(appState))

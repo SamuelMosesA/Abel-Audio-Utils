@@ -34,6 +34,9 @@ type Config struct {
 
 	// Loaded from credentials file
 	Credentials map[string]string `yaml:"-"`
+
+	// File the config was loaded from, used to reload it on engine restart
+	Path string `yaml:"-"`
 }
 
 func (cfg *Config) ResolveLanguageName(code string) string {
@@ -73,6 +76,7 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.Path = path
 
 	// Load credentials if configured
 	cfg.Credentials = make(map[string]string)

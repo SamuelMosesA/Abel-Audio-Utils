@@ -7,6 +7,7 @@
     import MeterPanel from "./MeterPanel.svelte";
     import RecordingList from "./RecordingList.svelte";
     import TranslationAdmin from "./TranslationAdmin.svelte";
+    import { fetchWithSync } from "$lib/utils/api";
     import {
         Play,
         Square,
@@ -15,9 +16,11 @@
         LogOut,
         ChevronLeft,
         Activity,
+        RotateCw,
     } from "lucide-svelte";
 
     let selectedDeviceValue = $state<string>("");
+    let restarting = $state(false);
 
     ui.currentView = "admin";
     system.connectWebSocket();
@@ -43,6 +46,28 @@
     const handleApplySettings = async () => {
         const id = selectedDeviceValue !== "" ? Number(selectedDeviceValue) : null;
         await audio.commitConfig(id);
+    };
+
+    const handleRestartEngine = async () => {
+        if (!confirm("Restarting the engine briefly interrupts live audio and translation for all listeners. Continue?")) {
+            return;
+        }
+        restarting = true;
+        try {
+            const res = await fetchWithSync("/api/audio/restart", { method: "POST" });
+            const body = await res.json().catch(() => ({}));
+            let message = body.error ?? `Restart failed (${res.status})`;
+            if (res.ok) {
+                message = `Engine restarted. ${(body.devices ?? []).length} devices found.`;
+                message += body.reconnected ? ` Reconnected to ${body.reconnected}.` : " Select your device and commit.";
+                message += body.configError ? ` Settings were not reloaded: ${body.configError}` : " Settings reloaded.";
+            }
+            ui.showNotification(message, "engine");
+            await audio.fetchDevices();
+            await audio.sync();
+        } finally {
+            restarting = false;
+        }
     };
 </script>
 
@@ -129,6 +154,21 @@
 
         <!-- Audio Engine Config & Recordings (Second on mobile) -->
         <div class="lg:col-span-2 space-y-8 lg:order-1">
+            <div class="space-y-2">
+                <Button
+                    variant="outline"
+                    class="w-full gap-2 font-bold"
+                    onclick={handleRestartEngine}
+                    disabled={audio.isRecording || restarting}
+                >
+                    <RotateCw class="w-4 h-4 {restarting ? 'animate-spin' : ''}" />
+                    {restarting ? "Restarting Engine..." : "Restart Engine"}
+                </Button>
+                <p class="text-xxs text-center text-muted-foreground">
+                    {audio.isRecording ? "Stop recording to restart the engine." : "Re-scans audio devices."}
+                </p>
+            </div>
+
             <Card title="Audio Engine Configuration">
                 <div class="space-y-6">
                     <div class="space-y-2">

@@ -149,3 +149,27 @@ func TestUpdateAudioConfigInvalidDeviceDoesNotPanic(t *testing.T) {
 	assert.False(t, appState.Config().IsRunning())
 	assert.False(t, appState.Engine().IsRunning())
 }
+
+func TestHLSPlaylistHandlerRejectsBlockedLanguage(t *testing.T) {
+	appState := state.NewAppState("", "")
+	cfg := &config.Config{
+		SampleRate:         48000,
+		AIOriginalLanguage: "en",
+		AILanguages: []config.AILanguage{
+			{Code: "es", Name: "Spanish"},
+		},
+	}
+	state.Update[state.AIConfig](appState, state.SectionAI, func(s *state.AIConfig) {
+		s.SetBlocked("es", true)
+	})
+	provider := &stubHLSProvider{}
+	router := gin.New()
+	router.GET("/api/audio/hls/:lang/index.m3u8", HLSPlaylistHandler(appState, cfg, provider))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audio/hls/es/index.m3u8", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Contains(t, w.Body.String(), "blocked")
+}

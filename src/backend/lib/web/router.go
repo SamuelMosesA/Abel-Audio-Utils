@@ -129,7 +129,7 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 		{
 			ai.GET("/subtitles", SubtitlesHandler(appState, cfg))
 			ai.GET("/subtitles/*lang", SubtitlesHandler(appState, cfg))
-			ai.GET("/streams", GetAIStreamsStatus(appState))
+			ai.GET("/streams", GetAIStreamsStatus(appState, cfg))
 			ai.GET("/config", GetAIConfig(cfg))
 		}
 

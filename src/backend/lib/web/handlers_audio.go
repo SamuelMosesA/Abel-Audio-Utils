@@ -189,6 +189,15 @@ func HLSPlaylistHandler(appState *state.AppState, cfg *config.Config, publisher 
 			sampleRate = cfg.SampleRate
 		}
 
+		if language != "default" {
+			resolved := cfg.ResolveLanguageName(language)
+			if appState.IsLanguageBlocked(language) || appState.IsLanguageBlocked(resolved) {
+				logger.Warn("HLS stream requested for blocked language", slog.String("stream.language", language))
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "translation audio is blocked"})
+				return
+			}
+		}
+
 		if language != "default" && appState.Translator == nil {
 			c.Redirect(http.StatusTemporaryRedirect, "/api/audio/hls/default/index.m3u8")
 			return

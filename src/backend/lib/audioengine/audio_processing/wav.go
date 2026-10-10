@@ -76,6 +76,12 @@ func FinalizeWavHeader(ws io.WriteSeeker, ch uint16, dataBytes int64, sampleRate
 	return WriteWavHeader(ws, ch, dataSize, sampleRate)
 }
 
+// FinalizeWavHeaderWithSamples converts sample count (frames) to data bytes and finalizes the header.
+func FinalizeWavHeaderWithSamples(ws io.WriteSeeker, ch uint16, samples int64, sampleRate int) error {
+	dataBytes := samples * int64(ch) * WavBytesPerSample
+	return FinalizeWavHeader(ws, ch, dataBytes, sampleRate)
+}
+
 // WriteWavHeader writes a standard 44-byte RIFF/WAVE header to the given writer.
 func WriteWavHeader(w io.Writer, ch uint16, dataSize uint32, sampleRate int) error {
 	if w == nil {

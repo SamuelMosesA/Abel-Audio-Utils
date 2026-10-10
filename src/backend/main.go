@@ -2,6 +2,7 @@ package main
 
 import (
 	"abel/src/backend/lib/audioengine"
+	"abel/src/backend/lib/audioengine/audio_processing"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/openai"
 	"abel/src/backend/lib/state"
@@ -113,7 +114,7 @@ func main() {
 	}
 
 	// Start workers
-	hlsPublisher, err := audioengine.NewHLSPublisher()
+	hlsPublisher, err := audio_processing.NewHLSPublisher()
 	if err != nil {
 		logger.Error("Safari-compatible HLS streaming unavailable", slog.Any("error", err))
 		os.Exit(1)

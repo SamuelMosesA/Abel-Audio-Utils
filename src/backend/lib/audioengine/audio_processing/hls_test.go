@@ -1,4 +1,4 @@
-package audioengine
+package audio_processing
 
 import (
 	"context"
@@ -20,7 +20,7 @@ func TestHLSPublisherProducesPlaylistAndMPEGTransportStream(t *testing.T) {
 		t.Skip("ffmpeg is not installed")
 	}
 
-	publisher := newHLSPublisher(ffmpegPath, t.TempDir())
+	publisher := NewHLSPublisherWithRoot(ffmpegPath, t.TempDir())
 	t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
 	const sampleRate = 48000
@@ -57,7 +57,7 @@ func TestHLSPublisherProducesPlaylistAndMPEGTransportStream(t *testing.T) {
 }
 
 func TestHLSPublisherRejectsPathTraversal(t *testing.T) {
-	publisher := newHLSPublisher("ffmpeg", t.TempDir())
+	publisher := NewHLSPublisherWithRoot("ffmpeg", t.TempDir())
 
 	_, err := publisher.ReadSegment("default", "../index.m3u8")
 	assert.True(t, errors.Is(err, ErrInvalidStreamName))
@@ -65,6 +65,6 @@ func TestHLSPublisherRejectsPathTraversal(t *testing.T) {
 }
 
 func TestFloat32ToPCM16ClampsSamples(t *testing.T) {
-	pcm := float32ToPCM16([]float32{-2, 0, 2})
+	pcm := Float32ToPCM16([]float32{-2, 0, 2})
 	assert.Equal(t, []byte{1, 128, 0, 0, 255, 127}, pcm)
 }

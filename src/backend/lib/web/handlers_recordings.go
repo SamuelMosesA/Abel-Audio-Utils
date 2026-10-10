@@ -1,8 +1,9 @@
 package web
 
 import (
-	"abel/src/backend/lib/audioengine"
+	"abel/src/backend/lib/audioengine/audio_processing"
 	"abel/src/backend/lib/config"
+	"abel/src/backend/lib/recording"
 	"abel/src/backend/lib/state"
 	"errors"
 	"fmt"
@@ -41,7 +42,7 @@ func createRecordingWavFile(folder string, sampleRate int) (*os.File, string, er
 	if err != nil {
 		return nil, "", err
 	}
-	if err := audioengine.WritePlaceholderHeader(file, 2, sampleRate); err != nil {
+	if err := audio_processing.WritePlaceholderWavHeader(file, 2, sampleRate); err != nil {
 		file.Close()
 		return nil, "", err
 	}
@@ -102,7 +103,7 @@ func stopRecordingSession(appState *state.AppState, sampleRate int) (string, err
 	}
 
 	filename := filepath.Base(file.Name())
-	if errFinalize := audioengine.FinalizeWavHeader(file, 2, samplesWrote, sampleRate); errFinalize != nil {
+	if errFinalize := audio_processing.FinalizeWavHeaderWithSamples(file, 2, samplesWrote, sampleRate); errFinalize != nil {
 		file.Close()
 		return "", errFinalize
 	}
@@ -126,7 +127,7 @@ func handleStartRecording(c *gin.Context, appState *state.AppState, sampleRate i
 	c.JSON(http.StatusOK, gin.H{"status": "Recording started", "file": filename})
 }
 
-func handleStopRecording(c *gin.Context, appState *state.AppState, sampleRate int, processor *RecordingProcessor) {
+func handleStopRecording(c *gin.Context, appState *state.AppState, sampleRate int, processor *recording.RecordingProcessor) {
 	filename, err := stopRecordingSession(appState, sampleRate)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -134,7 +135,7 @@ func handleStopRecording(c *gin.Context, appState *state.AppState, sampleRate in
 	}
 	response := gin.H{"status": "Recording stopped", "file": filename}
 	if processor != nil {
-		if job, processErr := processor.enqueue(filename, 0, 0, true); processErr != nil {
+		if job, processErr := processor.Enqueue(filename, 0, 0, true); processErr != nil {
 			slog.With("component", "recording").Error("Could not queue recording processing", "file", filename, "error", processErr)
 			response["processingError"] = processErr.Error()
 		} else {
@@ -144,7 +145,7 @@ func handleStopRecording(c *gin.Context, appState *state.AppState, sampleRate in
 	c.JSON(http.StatusOK, response)
 }
 
-func CreateRecording(appState *state.AppState, cfg *config.Config, processor *RecordingProcessor) gin.HandlerFunc {
+func CreateRecording(appState *state.AppState, cfg *config.Config, processor *recording.RecordingProcessor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			Action string   `json:"action"`
@@ -229,7 +230,7 @@ func ListRecordingFiles(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
-func PushRecordingToCloud(processor *RecordingProcessor) gin.HandlerFunc {
+func PushRecordingToCloud(processor *recording.RecordingProcessor) gin.HandlerFunc {
 	// @Summary Push recording to cloud
 	// @Description Copies a local file to the cloud drive location
 	// @Tags Recordings
@@ -251,7 +252,7 @@ func PushRecordingToCloud(processor *RecordingProcessor) gin.HandlerFunc {
 
 		if err := processor.Push(req.Source); err != nil {
 			status := http.StatusInternalServerError
-			if errors.Is(err, errInvalidExport) {
+			if errors.Is(err, recording.ErrInvalidExport) {
 				status = http.StatusBadRequest
 			} else if errors.Is(err, os.ErrNotExist) {
 				status = http.StatusNotFound
@@ -266,7 +267,7 @@ func PushRecordingToCloud(processor *RecordingProcessor) gin.HandlerFunc {
 	}
 }
 
-func ListRecordingLibrary(processor *RecordingProcessor) gin.HandlerFunc {
+func ListRecordingLibrary(processor *recording.RecordingProcessor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		entries, err := processor.Library()
 		if err != nil {
@@ -277,7 +278,7 @@ func ListRecordingLibrary(processor *RecordingProcessor) gin.HandlerFunc {
 	}
 }
 
-func ProcessRecording(processor *RecordingProcessor) gin.HandlerFunc {
+func ProcessRecording(processor *recording.RecordingProcessor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			Source       string  `json:"source"`
@@ -293,10 +294,10 @@ func ProcessRecording(processor *RecordingProcessor) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Manual trim needs a start or end time"})
 			return
 		}
-		job, err := processor.enqueue(req.Source, req.StartSeconds, req.EndSeconds, req.Automatic)
+		job, err := processor.Enqueue(req.Source, req.StartSeconds, req.EndSeconds, req.Automatic)
 		if err != nil {
 			status := http.StatusBadRequest
-			if errors.Is(err, errQueueFull) {
+			if errors.Is(err, recording.ErrQueueFull) {
 				status = http.StatusServiceUnavailable
 			} else if errors.Is(err, os.ErrNotExist) {
 				status = http.StatusNotFound
@@ -317,7 +318,7 @@ func ProcessRecording(processor *RecordingProcessor) gin.HandlerFunc {
 // @Security CookieAuth
 // @Security BasicAuth
 // @Router /api/recordings/process/cancel [post]
-func CancelRecordingProcessing(processor *RecordingProcessor) gin.HandlerFunc {
+func CancelRecordingProcessing(processor *recording.RecordingProcessor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			ID string `json:"id"`
@@ -338,7 +339,7 @@ const maxRecordingUpload = int64(4 << 30)
 
 func storeUploadedAudio(part *multipart.Part, storageDir string) (string, int64, error) {
 	base := filepath.Base(strings.ReplaceAll(part.FileName(), "\\", "/"))
-	if len(base) > 180 || !validAudioName(base) {
+	if len(base) > 180 || !recording.ValidAudioName(base) {
 		return "", 0, errors.New("Supported files: WAV, MP3, M4A, FLAC, AAC, OGG (name up to 180 bytes)")
 	}
 	if err := os.MkdirAll(storageDir, 0755); err != nil {
@@ -359,7 +360,7 @@ func storeUploadedAudio(part *multipart.Part, storageDir string) (string, int64,
 	if copied == 0 {
 		return "", 0, errors.New("Audio file is empty")
 	}
-	if err := validateAudioFile(tmp.Name()); err != nil {
+	if err := recording.ValidateAudioFile(tmp.Name()); err != nil {
 		return "", copied, errors.New("File does not contain readable audio")
 	}
 	name := fmt.Sprintf("import-%d-%s", time.Now().UnixNano(), base)
@@ -384,7 +385,7 @@ func respondUploadError(c *gin.Context, err error, bytesWritten int64) {
 	}
 }
 
-func UploadRecording(processor *RecordingProcessor) gin.HandlerFunc {
+func UploadRecording(processor *recording.RecordingProcessor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRecordingUpload+(1<<20))
 		reader, err := c.Request.MultipartReader()
@@ -407,7 +408,7 @@ func UploadRecording(processor *RecordingProcessor) gin.HandlerFunc {
 
 		slog.Info("Audio file imported", "file", name, "bytes", bytesWritten)
 		response := gin.H{"file": name}
-		if job, err := processor.enqueue(name, 0, 0, true); err != nil {
+		if job, err := processor.Enqueue(name, 0, 0, true); err != nil {
 			slog.Error("Could not queue imported audio", "file", name, "error", err)
 			response["processingError"] = err.Error()
 		} else {

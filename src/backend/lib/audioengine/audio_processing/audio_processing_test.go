@@ -99,7 +99,7 @@ func TestWavHeader(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, WavHeaderSize, buf.Len())
 
-	// Test seek and finalize on file
+	// Test seek and finalize on file with byte count
 	tmpFile := filepath.Join(t.TempDir(), "test.wav")
 	f, err := os.Create(tmpFile)
 	require.NoError(t, err)
@@ -118,6 +118,70 @@ func TestWavHeader(t *testing.T) {
 	_, err = io.ReadFull(f, finalized[:])
 	require.NoError(t, err)
 	assert.Equal(t, uint32(8), binary.LittleEndian.Uint32(finalized[40:44]))
+
+	// Test seek and finalize with sample count
+	err = FinalizeWavHeaderWithSamples(f, 2, 2, 48000) // 2 samples * 2 ch * 2 bytes = 8 bytes
+	require.NoError(t, err)
+
+	f.Seek(0, io.SeekStart)
+	_, err = io.ReadFull(f, finalized[:])
+	require.NoError(t, err)
+	assert.Equal(t, uint32(8), binary.LittleEndian.Uint32(finalized[40:44]))
+}
+
+func TestGenerateWavHeaderByteLayout(t *testing.T) {
+	// Test stereo 48000Hz with 1000 bytes data
+	h := GenerateWavHeader(2, 1000, 48000)
+	assert.Equal(t, "RIFF", string(h[0:4]))
+	assert.Equal(t, uint32(1036), binary.LittleEndian.Uint32(h[4:8]))
+	assert.Equal(t, "WAVE", string(h[8:12]))
+	assert.Equal(t, "fmt ", string(h[12:16]))
+	assert.Equal(t, uint32(16), binary.LittleEndian.Uint32(h[16:20]))
+	assert.Equal(t, uint16(1), binary.LittleEndian.Uint16(h[20:22]))
+	assert.Equal(t, uint16(2), binary.LittleEndian.Uint16(h[22:24]))
+	assert.Equal(t, uint32(48000), binary.LittleEndian.Uint32(h[24:28]))
+	assert.Equal(t, uint32(48000*2*2), binary.LittleEndian.Uint32(h[28:32])) // ByteRate
+	assert.Equal(t, uint16(4), binary.LittleEndian.Uint16(h[32:34]))         // BlockAlign
+	assert.Equal(t, uint16(16), binary.LittleEndian.Uint16(h[34:36]))        // BitsPerSample
+	assert.Equal(t, "data", string(h[36:40]))
+	assert.Equal(t, uint32(1000), binary.LittleEndian.Uint32(h[40:44]))
+
+	// Test mono fallback (ch=1, sampleRate<=0 -> fallback to 44100)
+	hMono := GenerateWavHeader(1, 500, 0)
+	assert.Equal(t, uint16(1), binary.LittleEndian.Uint16(hMono[22:24]))
+	assert.Equal(t, uint32(44100), binary.LittleEndian.Uint32(hMono[24:28]))
+	assert.Equal(t, uint32(44100*1*2), binary.LittleEndian.Uint32(hMono[28:32]))
+	assert.Equal(t, uint16(2), binary.LittleEndian.Uint16(hMono[32:34]))
+	assert.Equal(t, uint32(500), binary.LittleEndian.Uint32(hMono[40:44]))
+}
+
+func TestFinalizeWavHeaderEdgeCases(t *testing.T) {
+	// Nil file
+	err := FinalizeWavHeader(nil, 2, 100, 44100)
+	assert.NoError(t, err)
+
+	f, err := os.CreateTemp("", "test_edge_*.wav")
+	assert.NoError(t, err)
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	// Negative sample bytes clamps to 0
+	err = FinalizeWavHeader(f, 2, -10, 44100)
+	assert.NoError(t, err)
+	header := make([]byte, 44)
+	f.Seek(0, io.SeekStart)
+	f.Read(header)
+	assert.Equal(t, uint32(0), binary.LittleEndian.Uint32(header[40:44]))
+	assert.Equal(t, uint32(36), binary.LittleEndian.Uint32(header[4:8]))
+
+	// > 4GB clamps to max RIFF size (0xFFFFFFFF - 36)
+	err = FinalizeWavHeader(f, 2, 5000000000, 44100)
+	assert.NoError(t, err)
+	f.Seek(0, io.SeekStart)
+	f.Read(header)
+	maxData := uint32(0xFFFFFFFF - 36)
+	assert.Equal(t, maxData, binary.LittleEndian.Uint32(header[40:44]))
+	assert.Equal(t, uint32(0xFFFFFFFF), binary.LittleEndian.Uint32(header[4:8]))
 }
 
 func TestDownsampleStereoToMonoPCM24k(t *testing.T) {

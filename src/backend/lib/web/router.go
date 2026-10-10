@@ -1,8 +1,9 @@
 package web
 
 import (
-	"abel/src/backend/lib/audioengine"
+	"abel/src/backend/lib/audioengine/audio_processing"
 	"abel/src/backend/lib/config"
+	"abel/src/backend/lib/recording"
 	"abel/src/backend/lib/state"
 	"embed"
 	"fmt"
@@ -19,8 +20,8 @@ import (
 )
 
 // NewRouter constructs the Gin HTTP engine with authenticated admin routes and public endpoints.
-func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audioengine.HLSPublisher, staticFiles embed.FS) *gin.Engine {
-	processor := NewRecordingProcessor(cfg)
+func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio_processing.HLSPublisher, staticFiles embed.FS) *gin.Engine {
+	processor := recording.NewRecordingProcessor(cfg)
 	if appState != nil {
 		processor.SetOnUpdate(func() {
 			appState.Broadcast(state.SectionRecording)
@@ -161,7 +162,7 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 	return r
 }
 
-func RegisterAdminRoutes(r *gin.RouterGroup, appState *state.AppState, cfg *config.Config, processor *RecordingProcessor) {
+func RegisterAdminRoutes(r *gin.RouterGroup, appState *state.AppState, cfg *config.Config, processor *recording.RecordingProcessor) {
 	r.Use(SessionAuthMiddleware(appState))
 	{
 		r.PATCH("/audio/config", UpdateAudioConfig(appState, cfg))

@@ -2,6 +2,7 @@ package web
 
 import (
 	"abel/src/backend/lib/audioengine"
+	"abel/src/backend/lib/audioengine/audio_processing"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
 	"context"
@@ -238,7 +239,7 @@ func HLSSegmentHandler(publisher HLSProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		data, err := publisher.ReadSegment(c.Param("lang"), c.Param("segment"))
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) || errors.Is(err, audioengine.ErrHLSNotReady) {
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, audio_processing.ErrHLSNotReady) {
 				c.Status(http.StatusNotFound)
 				return
 			}

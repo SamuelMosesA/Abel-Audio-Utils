@@ -1,4 +1,4 @@
-package web
+package recording
 
 import (
 	"bufio"
@@ -32,7 +32,7 @@ type ProcessingJob struct {
 	ProcessedSeconds float64 `json:"processedSeconds"`
 	TotalSeconds     float64 `json:"totalSeconds"`
 	Error            string  `json:"error,omitempty"`
-	AutoPush         bool    `json:"autoPush"` // Selects automatic silence trimming and normalization; both job kinds push on completion.
+	AutoPush         bool    `json:"autoPush"`
 	Start            float64 `json:"-"`
 	End              float64 `json:"-"`
 }
@@ -79,12 +79,18 @@ type cachedDuration struct {
 	duration float64
 }
 
-var errInvalidExport = errors.New("invalid audio filename")
-var errQueueFull = errors.New("processing queue is full")
-var errJobNotCancellable = errors.New("processing job is not active")
+var ErrInvalidExport = errors.New("invalid audio filename")
+var ErrQueueFull = errors.New("processing queue is full")
+var ErrJobNotCancellable = errors.New("processing job is not active")
 
 func NewRecordingProcessor(cfg *config.Config) *RecordingProcessor {
-	p := &RecordingProcessor{cfg: cfg, jobs: make(map[string]ProcessingJob), cancels: make(map[string]context.CancelFunc), info: make(map[string]cachedDuration), queue: make(chan string, 32)}
+	p := &RecordingProcessor{
+		cfg:     cfg,
+		jobs:    make(map[string]ProcessingJob),
+		cancels: make(map[string]context.CancelFunc),
+		info:    make(map[string]cachedDuration),
+		queue:   make(chan string, 32),
+	}
 	go p.work()
 	go p.reconcileCloudLoop()
 	return p
@@ -163,7 +169,7 @@ func validFileName(name, extension string) bool {
 		strings.EqualFold(filepath.Ext(name), extension)
 }
 
-func validAudioName(name string) bool {
+func ValidAudioName(name string) bool {
 	for _, extension := range []string{".wav", ".mp3", ".m4a", ".flac", ".aac", ".ogg"} {
 		if validFileName(name, extension) {
 			return true
@@ -206,7 +212,7 @@ func (p *RecordingProcessor) validateManualTrim(stem string, start, end float64)
 }
 
 func (p *RecordingProcessor) validateEnqueueSource(source string, start, end float64) error {
-	if !validAudioName(source) {
+	if !ValidAudioName(source) {
 		return errors.New("invalid audio filename")
 	}
 	sourcePath := filepath.Join(p.cfg.StorageLocation, source)
@@ -225,7 +231,7 @@ func (p *RecordingProcessor) validateEnqueueSource(source string, start, end flo
 	return nil
 }
 
-func (p *RecordingProcessor) enqueue(source string, start, end float64, autoPush bool) (ProcessingJob, error) {
+func (p *RecordingProcessor) Enqueue(source string, start, end float64, autoPush bool) (ProcessingJob, error) {
 	if err := p.validateEnqueueSource(source, start, end); err != nil {
 		return ProcessingJob{}, err
 	}
@@ -258,9 +264,10 @@ func (p *RecordingProcessor) enqueue(source string, start, end float64, autoPush
 		p.jobs[id] = job
 		return job, nil
 	default:
-		return ProcessingJob{}, errQueueFull
+		return ProcessingJob{}, ErrQueueFull
 	}
 }
+
 func (p *RecordingProcessor) update(id, stage string, progress float64, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -288,7 +295,7 @@ func (p *RecordingProcessor) Cancel(id string) error {
 	job, ok := p.jobs[id]
 	if !ok || !activeProcessingStage(job.Stage) {
 		p.mu.Unlock()
-		return errJobNotCancellable
+		return ErrJobNotCancellable
 	}
 	job.Stage = "cancelled"
 	job.Error = "Processing stopped by user"
@@ -353,7 +360,7 @@ func probeDurationWithContext(parent context.Context, path string) (float64, err
 	return duration, nil
 }
 
-func validateAudioFile(path string) error {
+func ValidateAudioFile(path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_type", "-of", "csv=p=0", path).CombinedOutput()
@@ -375,8 +382,6 @@ func (p *RecordingProcessor) duration(name string, info os.FileInfo) (float64, e
 	}
 	if strings.EqualFold(filepath.Ext(name), ".wav") {
 		if strings.HasPrefix(name, "rec_") {
-			// Abel's own WAVs use a fixed 44-byte header. A zero data length
-			// means the recording has not been finalized yet.
 			return wavDuration(path), nil
 		}
 	}
@@ -410,8 +415,6 @@ func displayName(name string) string {
 	return strings.TrimSuffix(name, filepath.Ext(name))
 }
 
-// Detect only silence touching the recording boundaries. Long or ambiguous
-// silence is left untouched, matching the conservative process-sermon behavior.
 func detectEdgeTrim(path string, duration float64) (float64, float64, error) {
 	return detectEdgeTrimWithProgress(path, duration, nil)
 }
@@ -499,6 +502,7 @@ func detectEdgeTrimWithContext(parent context.Context, path string, duration flo
 	start, end := parseSilenceEdges(stderr.String(), duration)
 	return start, end, nil
 }
+
 func tail(data []byte) string {
 	if len(data) > 2048 {
 		data = data[len(data)-2048:]
@@ -594,6 +598,7 @@ func (p *RecordingProcessor) executeFFmpegEncode(ctx context.Context, job Proces
 	}
 	return nil
 }
+
 func finalizeMP3File(tmpPath, outputPath string) error {
 	info, err := regularFile(tmpPath)
 	if err != nil || info.Size() == 0 {
@@ -736,15 +741,15 @@ func copyToCloudLocation(ctx context.Context, srcPath, cloudDir, target string) 
 	}
 	return nil
 }
+
 func (p *RecordingProcessor) pushWithContext(ctx context.Context, name string) error {
-	if !validAudioName(name) {
-		return errInvalidExport
+	if !ValidAudioName(name) {
+		return ErrInvalidExport
 	}
 	source := name
 	if mapped, err := p.sourceForExport(name); err == nil {
 		source = mapped
 	} else {
-		// Original audio can be pushed when processing has failed.
 		if _, sourceErr := regularFile(filepath.Join(p.cfg.StorageLocation, name)); sourceErr != nil {
 			return fmt.Errorf("recording unavailable: %w", sourceErr)
 		}
@@ -771,10 +776,10 @@ func (p *RecordingProcessor) pushWithContext(ctx context.Context, name string) e
 func (p *RecordingProcessor) sourceForExport(name string) (string, error) {
 	matches := exportName.FindStringSubmatch(name)
 	if matches == nil {
-		return "", errInvalidExport
+		return "", ErrInvalidExport
 	}
 	for _, candidate := range []string{matches[1] + ".wav", matches[1] + ".WAV", matches[1]} {
-		if validAudioName(candidate) {
+		if ValidAudioName(candidate) {
 			if _, err := regularFile(filepath.Join(p.cfg.StorageLocation, candidate)); err == nil {
 				return candidate, nil
 			}
@@ -783,7 +788,7 @@ func (p *RecordingProcessor) sourceForExport(name string) (string, error) {
 	files, err := os.ReadDir(p.cfg.StorageLocation)
 	if err == nil {
 		for _, file := range files {
-			if validAudioName(file.Name()) && outputStem(file.Name()) == matches[1] {
+			if ValidAudioName(file.Name()) && outputStem(file.Name()) == matches[1] {
 				if _, err := regularFile(filepath.Join(p.cfg.StorageLocation, file.Name())); err == nil {
 					return file.Name(), nil
 				}
@@ -822,7 +827,7 @@ func (p *RecordingProcessor) scanLibraryFiles(dir []os.DirEntry) ([]RecordingEnt
 			continue
 		}
 		_, isExport := p.sourceForExport(file.Name())
-		if validAudioName(file.Name()) && isExport != nil {
+		if ValidAudioName(file.Name()) && isExport != nil {
 			duration, _ := p.duration(file.Name(), info)
 			rawName, err := p.cloudNameFor(file.Name(), file.Name(), info.ModTime(), false)
 			if err != nil {
@@ -830,8 +835,17 @@ func (p *RecordingProcessor) scanLibraryFiles(dir []os.DirEntry) ([]RecordingEnt
 			}
 			rawCloudPath, rawPushed := cloudCopyPath(p.cfg.CloudDriveLocation,
 				rawName, file.Name(), info.Size(), info.ModTime())
-			entries = append(entries, RecordingEntry{Name: file.Name(), Display: displayName(file.Name()), Size: info.Size(), ModTime: info.ModTime(),
-				Duration: duration, RawCloudPath: rawCloudPath, RawPushed: rawPushed, Exports: []RecordingExport{}, Jobs: []ProcessingJob{}})
+			entries = append(entries, RecordingEntry{
+				Name:         file.Name(),
+				Display:      displayName(file.Name()),
+				Size:         info.Size(),
+				ModTime:      info.ModTime(),
+				Duration:     duration,
+				RawCloudPath: rawCloudPath,
+				RawPushed:    rawPushed,
+				Exports:      []RecordingExport{},
+				Jobs:         []ProcessingJob{},
+			})
 		} else if validFileName(file.Name(), ".mp3") {
 			duration, _ := p.duration(file.Name(), info)
 			exports = append(exports, RecordingExport{Name: file.Name(), Size: info.Size(), ModTime: info.ModTime(), Duration: duration})
@@ -852,10 +866,10 @@ func (p *RecordingProcessor) populateExportsAndJobs(entries []RecordingEntry, ex
 					return err
 				}
 				path, pushed := cloudCopyPath(p.cfg.CloudDriveLocation, cloudName, export.Name, export.Size, export.ModTime)
-			export.CloudPath = path
-			export.CloudTargetPath = filepath.Join(p.cfg.CloudDriveLocation, cloudName)
-			export.Pushed = pushed
-			entries[i].Exports = append(entries[i].Exports, export)
+				export.CloudPath = path
+				export.CloudTargetPath = filepath.Join(p.cfg.CloudDriveLocation, cloudName)
+				export.Pushed = pushed
+				entries[i].Exports = append(entries[i].Exports, export)
 			}
 		}
 		for _, job := range p.jobs {

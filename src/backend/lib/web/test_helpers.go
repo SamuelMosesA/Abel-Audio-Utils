@@ -2,6 +2,7 @@ package web
 
 import (
 	"abel/src/backend/lib/config"
+	"abel/src/backend/lib/recording"
 	"abel/src/backend/lib/state"
 	"sync"
 
@@ -11,10 +12,10 @@ import (
 )
 
 func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
-	return setupTestRouterWithProcessor(stateObj, cfg, NewRecordingProcessor(cfg))
+	return setupTestRouterWithProcessor(stateObj, cfg, recording.NewRecordingProcessor(cfg))
 }
 
-func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, processor *RecordingProcessor) *gin.Engine {
+func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, processor *recording.RecordingProcessor) *gin.Engine {
 	if processor != nil && stateObj != nil {
 		processor.SetOnUpdate(func() {
 			stateObj.Broadcast(state.SectionRecording)

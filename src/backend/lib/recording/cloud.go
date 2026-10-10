@@ -1,4 +1,4 @@
-package web
+package recording
 
 import (
 	"encoding/json"
@@ -33,7 +33,7 @@ func recordingDate(source string, fallback time.Time) time.Time {
 	return fallback.Local()
 }
 
-func cloudFilename(source, name string, modTime time.Time) string {
+func CloudFilename(source, name string, modTime time.Time) string {
 	base := recordingDate(source, modTime).Format("2006-01-02_15-04-05")
 	if name == source {
 		return base + "-original" + filepath.Ext(name)
@@ -42,6 +42,10 @@ func cloudFilename(source, name string, modTime time.Time) string {
 		return base + "-trimmed.mp3"
 	}
 	return base + ".mp3"
+}
+
+func cloudFilename(source, name string, modTime time.Time) string {
+	return CloudFilename(source, name, modTime)
 }
 
 func numberedCloudFilename(base string, number int) string {
@@ -71,7 +75,7 @@ func (p *RecordingProcessor) loadCloudNamesLocked() error {
 		return fmt.Errorf("parse cloud names: %w", err)
 	}
 	for local, target := range names {
-		if !validAudioName(local) || !validAudioName(target) {
+		if !ValidAudioName(local) || !ValidAudioName(target) {
 			return errors.New("cloud name manifest contains an invalid filename")
 		}
 	}

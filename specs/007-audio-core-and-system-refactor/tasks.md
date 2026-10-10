@@ -128,10 +128,10 @@
 
 **Purpose**: End-to-end verification, cleanup, and documentation confirmation.
 
-- [ ] T036 [P] Run full backend race test suite `go test -v -race ./src/backend/...` and verify 0 failures and 0 race conditions
-- [ ] T037 [P] Run frontend test suite `bun run test:unit` and build check `bun run build`
-- [ ] T038 Validate all scenarios in [quickstart.md](file:///home/samuelmoses/Workspace/Church/Abel-Audio-Utils/specs/007-audio-core-and-system-refactor/quickstart.md)
-- [ ] T039 Clean up any unused files, comments, or temporary artifacts across the repository (Constitution Principle I)
+- [x] T036 [P] Run full backend race test suite `go test -v -race ./src/backend/...` and verify 0 failures and 0 race conditions
+- [x] T037 [P] Run frontend test suite `bun run test:unit` and build check `bun run build`
+- [x] T038 Validate all scenarios in [quickstart.md](file:///home/samuelmoses/Workspace/Church/Abel-Audio-Utils/specs/007-audio-core-and-system-refactor/quickstart.md)
+- [x] T039 Clean up any unused files, comments, or temporary artifacts across the repository (Constitution Principle I)
 
 ---
 

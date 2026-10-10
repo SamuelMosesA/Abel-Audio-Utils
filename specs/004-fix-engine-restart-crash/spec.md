@@ -8,6 +8,13 @@
 
 **Input**: User description: "The backend crashes when the engine is restarted"
 
+## Clarifications
+
+### Session 2026-10-10
+
+- Q: How should the backend handle concurrent or rapid successive requests to restart the audio engine? → A: Reject overlapping requests immediately with HTTP 409 Conflict ("Audio engine restart already in progress").
+- Q: How should the system behave if audio driver re-initialization fails during a restart? → A: Return HTTP 500 with driver error details, keep web server and UI alive, and leave engine in stopped state (deviceID: -1).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Resilient Audio Engine Restart & Hardware Discovery (Priority: P1)
@@ -31,11 +38,11 @@ An administrator or automated client might click the restart button multiple tim
 
 **Why this priority**: Hardware driver interfaces (such as PortAudio / ALSA) are strictly non-thread-safe during initialization and teardown. Unsynchronized concurrent calls trigger memory corruption (`SIGSEGV`) and bring down the entire application.
 
-**Independent Test**: Can be fully tested by firing multiple simultaneous restart requests to `/api/audio/restart` (e.g., 5 concurrent requests) and verifying that all requests are cleanly serialized or resolved without any process crash or panic.
+**Independent Test**: Can be fully tested by firing multiple simultaneous restart requests to `/api/audio/restart` (e.g., 5 concurrent requests) and verifying that the in-flight request proceeds while overlapping requests are rejected with HTTP 409 Conflict without any process crash or panic.
 
 **Acceptance Scenarios**:
 
-1. **Given** an engine restart operation already in progress, **When** a second restart request arrives, **Then** the system serializes the request or returns an orderly status indicating an operation is underway, avoiding concurrent calls to the audio driver layer.
+1. **Given** an engine restart operation already in progress, **When** a concurrent restart request arrives, **Then** the system rejects the request immediately with HTTP 409 Conflict ("Audio engine restart already in progress"), preventing concurrent calls to the audio driver layer.
 2. **Given** multiple concurrent restart triggers, **Then** zero memory corruption signals or channel closure panics occur.
 
 ---
@@ -58,9 +65,9 @@ When an audio engine restart is requested, the system must deterministically coo
 ### Edge Cases
 
 - **Restart when audio device is unplugged or missing**: The system must detect that the previous device is no longer enumerated, log an appropriate warning, leave the device unselected (`deviceID: -1`), and remain healthy without crashing.
-- **Rapid double-clicks on restart UI**: The backend must handle rapid requests without panicking on already-closed channels or corrupting global state.
+- **Rapid double-clicks on restart UI**: The backend rejects in-flight duplicates with HTTP 409 Conflict, avoiding channel panic or driver memory corruption.
 - **Restart requested while recording is active**: The existing protection (rejecting restart with HTTP 409 Conflict when recording is underway) must remain intact.
-- **PortAudio driver failure during reinitialization**: If native initialization fails, the system must capture the error, report it via HTTP 500 JSON response, and not take down the entire web server process.
+- **PortAudio driver failure during reinitialization**: If native initialization fails, the system captures the error, returns HTTP 500 JSON response with error details, leaves the engine stopped (`deviceID: -1`), and keeps the web server process running.
 
 ## Requirements *(mandatory)*
 
@@ -69,10 +76,11 @@ When an audio engine restart is requested, the system must deterministically coo
 - **FR-001**: The system MUST serialize audio engine restart and device re-initialization operations using strict concurrency controls to prevent simultaneous driver calls.
 - **FR-002**: The system MUST deterministically wait for active audio stream goroutines to stop and close their streams before reinitializing native audio drivers.
 - **FR-003**: The system MUST safely manage lifecycle quit channels and flags to prevent duplicate channel closure panics under concurrent access.
-- **FR-004**: The system MUST handle audio driver initialization and query errors gracefully, returning structured error messages rather than causing process-level termination.
-- **FR-005**: The system MUST preserve user configuration (channels, gain/boost) across restarts unless the underlying configuration file specifies changed defaults.
-- **FR-006**: The system MUST reject restart attempts with HTTP 409 Conflict when recording is active.
-- **FR-007**: All unit and integration tests across the audio engine and web handlers MUST pass with the Go race detector enabled.
+- **FR-004**: When an audio engine restart is already in progress, the system MUST reject concurrent restart requests immediately with HTTP 409 Conflict ("Audio engine restart already in progress").
+- **FR-005**: If audio driver re-initialization fails during a restart, the system MUST return HTTP 500 with driver error details, keep the web server and UI active, and transition the engine state to stopped (`deviceID: -1`).
+- **FR-006**: The system MUST preserve user configuration (channels, gain/boost) across restarts unless the underlying configuration file specifies changed defaults.
+- **FR-007**: The system MUST reject restart attempts with HTTP 409 Conflict when recording is active.
+- **FR-008**: All unit and integration tests across the audio engine and web handlers MUST pass with the Go race detector enabled.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -84,7 +92,7 @@ When an audio engine restart is requested, the system must deterministically coo
 ### Measurable Outcomes
 
 - **SC-001**: 100% of single and burst engine restart requests complete without crashing or terminating the server process.
-- **SC-002**: Concurrent burst restart requests (e.g. 5 parallel requests) execute safely with zero process crashes and zero segmentation faults.
+- **SC-002**: Concurrent burst restart requests (e.g. 5 parallel requests) execute safely: exactly one proceeds while overlapping requests receive HTTP 409 Conflict, with zero process crashes and zero segmentation faults.
 - **SC-003**: After a successful engine restart, audio device discovery succeeds within 2 seconds.
 - **SC-004**: If the previously selected audio device is still connected, the audio engine automatically resumes capture without requiring manual administrator intervention.
 - **SC-005**: 100% of unit tests pass with zero race condition warnings under `go test -race`.

@@ -4,6 +4,10 @@
 **Date**: 2026-10-10
 **Spec**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md)
 
+> **Constitution Mandate**: Every task MUST prioritize code subtraction, strict encapsulation, zero duplication, and clear functional naming (Principles I, V, VI, VII, VIII, IX). Look for opportunities to delete redundant code, unexport private state, and simplify call paths throughout implementation.
+
+---
+
 ## Phase 1: Setup (Dependencies & Infrastructure)
 
 **Purpose**: Verify dependencies and prepare package directories for consolidation.
@@ -35,12 +39,12 @@
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] Refactor `storage.go` to use `audio_processing.ConvertStereoFloat32ToPCM16LE` and remove the inline clamping loop in `src/backend/lib/audioengine/storage.go`
-- [ ] T009 [US1] Remove inner-loop mutex locking (`WriteWithFile` file mutex acquisition) on per-chunk audio writes in `src/backend/lib/audioengine/storage.go`
-- [ ] T010 [US1] Refactor `EngineState` and `Engine` in `src/backend/lib/state/engine.go` and `src/backend/lib/audioengine/engine.go` to allow lock-free chunk writes by the single storage worker while safely coordinating start/stop recording transitions
+- [ ] T008 [US1] Refactor `storage.go` to use `audio_processing.ConvertStereoFloat32ToPCM16LE` and remove the inline clamping loop (Constitution Principle I: subtraction) in `src/backend/lib/audioengine/storage.go`
+- [ ] T009 [US1] Remove inner-loop mutex locking (`WriteWithFile` file mutex acquisition) on per-chunk audio writes (Constitution Principle IX: lock-free pipeline) in `src/backend/lib/audioengine/storage.go`
+- [ ] T010 [US1] Refactor `EngineState` and `Engine` in `src/backend/lib/state/engine.go` and `src/backend/lib/audioengine/engine.go` to allow lock-free chunk writes by the single storage worker while safely coordinating start/stop recording transitions with private encapsulated state
 - [ ] T011 [US1] Simplify and clarify the engine-to-recording call graph so PortAudio capture to file recording is a transparent, 3-step functional flow in `src/backend/lib/audioengine/engine.go` and `src/backend/lib/audioengine/storage.go`
-- [ ] T012 [US1] Remove deprecated delegates from `src/backend/lib/audioengine/wav.go` and clean up `src/backend/lib/audioengine/hls.go` to import from `audio_processing`
-- [ ] T013 [US1] Delete obsolete `src/backend/lib/audioengine/conversion/` package and update all backend import paths across the repository
+- [ ] T012 [US1] Delete redundant delegator functions in `src/backend/lib/audioengine/wav.go` and eliminate duplicated wrappers in `src/backend/lib/audioengine/hls.go` (Constitution Principle I: delete obsolete code)
+- [ ] T013 [US1] Delete obsolete `src/backend/lib/audioengine/conversion/` package entirely and update all backend import paths across the repository
 - [ ] T014 [US1] Run unit and race tests on audio engine and storage in `src/backend/lib/audioengine/...` and `src/backend/lib/state/...`
 
 **Checkpoint**: User Story 1 complete — recording pipeline is lock-free, clean, and directly auditable.
@@ -56,11 +60,11 @@
 ### Implementation for User Story 2
 
 - [ ] T015 [P] [US2] Implement shared `PendingAudioBuffer` (bounded 15-second FIFO ring buffer of 24 kHz mono PCM16) in `src/backend/lib/openai/buffer.go`
-- [ ] T016 [P] [US2] Implement shared `SubtitleBroadcaster` helper for JSON subtitle encoding and non-blocking delivery in `src/backend/lib/openai/broadcast.go`
+- [ ] T016 [P] [US2] Implement shared `SubtitleBroadcaster` helper for JSON subtitle encoding and non-blocking delivery (Constitution Principle V: eliminate duplicated broadcast loops) in `src/backend/lib/openai/broadcast.go`
 - [ ] T017 [P] [US2] Implement clean PCM conversion and audio delta decoding utility functions (`DownsampleChunkForAI`, `DecodeAIDelta`) in `src/backend/lib/openai/audio_util.go`
-- [ ] T018 [US2] Refactor `TranslationManager` in `src/backend/lib/openai/translation.go` to use `sync_map.Map[string, *RealtimeSession]`, `sync_map.Map[string, []chan string]`, and `sync_map.Map[string, time.Time]` from `github.com/zolstein/sync-map`, route downsampling through `audio_util.go`, and delegate broadcasting to `broadcast.go`
-- [ ] T019 [US2] Refactor `TranscriptionManager` in `src/backend/lib/openai/transcription.go` to use `sync_map.Map` from `github.com/zolstein/sync-map`, route downsampling through `audio_util.go`, integrate `PendingAudioBuffer` for resilient reconnects, and delegate broadcasting to `broadcast.go`
-- [ ] T020 [US2] Simplify connection dialing, backoff, and error auditing in `src/backend/lib/openai/translation.go` and `src/backend/lib/openai/transcription.go` into concise, explicitly named functions
+- [ ] T018 [US2] Refactor `TranslationManager` in `src/backend/lib/openai/translation.go` to use `sync_map.Map[string, *RealtimeSession]`, `sync_map.Map[string, []chan string]`, and `sync_map.Map[string, time.Time]` from `github.com/zolstein/sync-map`, route downsampling through `audio_util.go`, delete inline duplicated broadcasting, and encapsulate fields
+- [ ] T019 [US2] Refactor `TranscriptionManager` in `src/backend/lib/openai/transcription.go` to use `sync_map.Map` from `github.com/zolstein/sync-map`, route downsampling through `audio_util.go`, integrate `PendingAudioBuffer` for resilient reconnects, delete duplicated broadcasting, and encapsulate fields
+- [ ] T020 [US2] Simplify connection dialing, backoff, and error auditing in `src/backend/lib/openai/translation.go` and `src/backend/lib/openai/transcription.go` into concise, explicitly named functions (<40 lines each, Constitution Principle VII)
 - [ ] T021 [US2] Update `audio_processing` imports in `src/backend/lib/openai/translation.go` and `src/backend/lib/openai/transcription.go`
 - [ ] T022 [US2] Add unit tests verifying typed session registration, PCM conversion utility, subtitle broadcasting, and reconnect buffering in `src/backend/lib/openai/openai_test.go`
 
@@ -95,7 +99,7 @@
 
 - [ ] T027 [US4] Broadcast `state.SectionRecording` via `appState.Broadcast(state.SectionRecording)` upon normal MP3 processing completion and audio trim job completion in `src/backend/lib/web/file_watcher.go` and `src/backend/lib/web/handlers_audio.go`
 - [ ] T028 [US4] Wire frontend SSE changelog listener in `src/frontend/src/lib/audioState.svelte.ts` to trigger `files.fetchFiles()` when receiving `section === "recording"` events
-- [ ] T029 [US4] Remove section-specific refresh button from `RecordingList.svelte` in `src/frontend/src/lib/components/admin/RecordingList.svelte`
+- [ ] T029 [US4] Delete section-specific refresh button from `RecordingList.svelte` (Constitution Principle I: subtraction over addition) in `src/frontend/src/lib/components/admin/RecordingList.svelte`
 - [ ] T030 [US4] Add a unified Master Refresh button in the console header of `AudioAdminView.svelte` in `src/frontend/src/lib/components/admin/AudioAdminView.svelte` that coordinates refreshing devices, engine state, recordings, and network connection info
 - [ ] T031 [US4] Verify live updates and Master Refresh functionality with frontend unit tests in `src/frontend/src/lib/audioState.test.ts` and `src/frontend/src/lib/components/admin/AudioPlayer.test.ts`
 
@@ -111,10 +115,10 @@
 
 ### Implementation for User Story 5
 
-- [ ] T032 [US5] Audit and decompose any remaining large functions in `audioengine`, `openai`, and `web` into small, explicitly named functions (<40 lines each)
-- [ ] T033 [US5] Enforce struct field encapsulation by making mutable internal fields unexported and providing clean accessor methods across `state` and `openai`
-- [ ] T034 [US5] Ensure state models and interface declarations reside in distinctly named, logically separated files in `src/backend/lib/state/`
-- [ ] T035 [US5] Verify that the path from PortAudio engine to recording storage is transparent, modular, and manually verifiable in under 3 minutes
+- [ ] T032 [US5] Audit and decompose any remaining large functions in `audioengine`, `openai`, and `web` into small, explicitly named functions (<40 lines each, Constitution Principle VII)
+- [ ] T033 [US5] Enforce struct field encapsulation by making mutable internal fields unexported and providing clean accessor methods across `state` and `openai` (Constitution Principle VIII)
+- [ ] T034 [US5] Ensure state models and interface declarations reside in distinctly named, logically separated files in `src/backend/lib/state/` (Constitution Principle VIII)
+- [ ] T035 [US5] Verify that the path from PortAudio engine to recording storage is transparent, modular, and manually verifiable in under 3 minutes (Constitution Principle IX)
 
 **Checkpoint**: User Story 5 complete — code quality standards and encapsulation strictly satisfied.
 
@@ -127,7 +131,7 @@
 - [ ] T036 [P] Run full backend race test suite `go test -v -race ./src/backend/...` and verify 0 failures and 0 race conditions
 - [ ] T037 [P] Run frontend test suite `bun run test:unit` and build check `bun run build`
 - [ ] T038 Validate all scenarios in [quickstart.md](file:///home/samuelmoses/Workspace/Church/Abel-Audio-Utils/specs/007-audio-core-and-system-refactor/quickstart.md)
-- [ ] T039 Clean up any unused files, comments, or temporary artifacts
+- [ ] T039 Clean up any unused files, comments, or temporary artifacts across the repository (Constitution Principle I)
 
 ---
 

@@ -2,7 +2,7 @@ package audioengine
 
 import (
 	"context"
-	"encoding/binary"
+	"abel/src/backend/lib/audioengine/conversion"
 	"errors"
 	"fmt"
 	"io"
@@ -184,7 +184,7 @@ func (p *HLSPublisher) runEncoder(language string, stream *hlsStream, cmd *exec.
 	for !stopping {
 		select {
 		case chunk := <-stream.input:
-			pcm := float32ToPCM16(chunk)
+			pcm := conversion.Float32ToPCM16(chunk)
 			if _, err := stdin.Write(pcm); err != nil {
 				if stream.ctx.Err() == nil {
 					logger.Warn("HLS encoder input closed", slog.Any("error", err))
@@ -211,16 +211,7 @@ func (p *HLSPublisher) runEncoder(language string, stream *hlsStream, cmd *exec.
 }
 
 func float32ToPCM16(chunk []float32) []byte {
-	pcm := make([]byte, len(chunk)*2)
-	for i, sample := range chunk {
-		if sample > 1 {
-			sample = 1
-		} else if sample < -1 {
-			sample = -1
-		}
-		binary.LittleEndian.PutUint16(pcm[i*2:], uint16(int16(sample*32767)))
-	}
-	return pcm
+	return conversion.Float32ToPCM16(chunk)
 }
 
 func (p *HLSPublisher) Publish(language string, sampleRate int, chunk []float32) error {

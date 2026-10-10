@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/base64"
+	"abel/src/backend/lib/audioengine/conversion"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -213,60 +214,7 @@ func (m *TranslationManager) downsample(chunk []float32) []byte {
 	if srcRate <= 0 {
 		srcRate = m.Config.SampleRate
 	}
-	dstRate := 24000 // OpenAI Realtime expects 24kHz
-
-	// If sample rates are already equal to 24000 (mono conversion only)
-	if srcRate == dstRate {
-		downsampled := make([]int16, len(chunk)/2)
-		for i := 0; i < len(chunk)/2; i++ {
-			avg := (chunk[i*2] + chunk[i*2+1]) / 2.0
-			if avg > 1.0 { avg = 1.0 } else if avg < -1.0 { avg = -1.0 }
-			downsampled[i] = int16(avg * 32767)
-		}
-		bytes := make([]byte, len(downsampled)*2)
-		for i, v := range downsampled {
-			bytes[i*2] = byte(v & 0xff)
-			bytes[i*2+1] = byte(v >> 8)
-		}
-		return bytes
-	}
-
-	// General downsampling using accumulators/ratios
-	ratio := float64(srcRate) / float64(dstRate)
-	srcFrames := len(chunk) / 2
-	dstFrames := int(float64(srcFrames) / ratio)
-	if dstFrames <= 0 {
-		return nil
-	}
-
-	downsampled := make([]int16, dstFrames)
-	for i := 0; i < dstFrames; i++ {
-		startFrame := int(float64(i) * ratio)
-		endFrame := int(float64(i+1) * ratio)
-		if endFrame > srcFrames {
-			endFrame = srcFrames
-		}
-		if endFrame <= startFrame {
-			endFrame = startFrame + 1
-		}
-
-		var sum float32
-		count := 0
-		for f := startFrame; f < endFrame; f++ {
-			sum += chunk[f*2] + chunk[f*2+1]
-			count += 2
-		}
-		avg := sum / float32(count)
-		if avg > 1.0 { avg = 1.0 } else if avg < -1.0 { avg = -1.0 }
-		downsampled[i] = int16(avg * 32767)
-	}
-
-	bytes := make([]byte, len(downsampled)*2)
-	for i, v := range downsampled {
-		bytes[i*2] = byte(v & 0xff)
-		bytes[i*2+1] = byte(v >> 8)
-	}
-	return bytes
+	return conversion.DownsampleStereoToMonoPCM24k(chunk, srcRate)
 }
 
 // Reconnect policy for a translation session. A session is supervised for

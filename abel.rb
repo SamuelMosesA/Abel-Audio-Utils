@@ -28,7 +28,7 @@ class Abel < Formula
     system "go", "run", "github.com/swaggo/swag/cmd/swag@latest", "init", "-g", "src/backend/main.go"
 
     # 4. Build backend
-    system "go", "build", "-o", bin/"abel", "src/backend/main.go"
+    system "go", "build", "-o", (bin/"abel").to_s, "src/backend/main.go"
 
     # 5. Copy example config to etc
     (etc/"abel").mkpath

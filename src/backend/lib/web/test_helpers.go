@@ -83,5 +83,6 @@ func (m *MockTranslator) StopSession(lang string, subs bool) {}
 func (m *MockTranslator) CloseAll()                          {}
 func (m *MockTranslator) PushAudio(samples []float32)        {}
 func (m *MockTranslator) SetOnStateChange(fn func())         {}
+func (m *MockTranslator) GetListenerCount(lang string) int           { return 0 }
 
 var testCfg = &config.Config{}

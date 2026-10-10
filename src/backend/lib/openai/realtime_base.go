@@ -178,6 +178,13 @@ func (m *OpenAIManager) PushAudio(chunk []float32) {
 	m.Translator.PushAudio(chunk)
 }
 
+func (m *OpenAIManager) GetListenerCount(language string) int {
+	if m.isOriginalLanguage(language) {
+		return m.Transcriber.GetListenerCount(language)
+	}
+	return m.Translator.GetListenerCount(language)
+}
+
 func DecodeAudioDelta(delta64 string, targetRate int) ([]float32, error) {
 	data, err := base64.StdEncoding.DecodeString(delta64)
 	if err != nil {

@@ -3,18 +3,20 @@ package openai
 import (
 	"context"
 	"encoding/base64"
-	"abel/src/backend/lib/audioengine/conversion"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"abel/src/backend/lib/audioengine/conversion"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
 	"abel/src/backend/lib/telemetry"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
@@ -74,11 +76,39 @@ func (m *TranscriptionManager) ListSessions() []state.SessionInfo {
 	m.Sessions.Range(func(key, value interface{}) bool {
 		lang := key.(string)
 		list = append(list, state.SessionInfo{
-			Language: lang,
+			Language:  lang,
+			Listeners: m.GetListenerCount(lang),
+			Subtitles: true,
 		})
 		return true
 	})
 	return list
+}
+
+func (m *TranscriptionManager) GetListenerCount(language string) int {
+	if language == "" {
+		language = m.OriginalLanguage
+	}
+	code := m.Config.ResolveLanguageCode(language)
+	name := m.Config.ResolveLanguageName(language)
+
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+
+	count := 0
+	if val, ok := m.Subscribers.Load(code); ok {
+		if subs, ok := val.([]chan string); ok {
+			count += len(subs)
+		}
+	}
+	if strings.ToLower(code) != strings.ToLower(name) {
+		if val, ok := m.Subscribers.Load(name); ok {
+			if subs, ok := val.([]chan string); ok {
+				count += len(subs)
+			}
+		}
+	}
+	return count
 }
 
 func (m *TranscriptionManager) StopSession(language string, subtitles bool) {
@@ -186,7 +216,7 @@ func (m *TranscriptionManager) PushAudio(chunk []float32) {
 
 	m.Sessions.Range(func(key, value interface{}) bool {
 		s := value.(*RealtimeSession)
-		
+
 		// Push raw audio directly to output for low-latency bypass
 		select {
 		case s.AudioOut <- chunk:
@@ -244,7 +274,7 @@ func (m *TranscriptionManager) runSession(s *RealtimeSession) {
 	config := SessionUpdateEvent{
 		Type: "session.update",
 		Session: SessionConfig{
-			Type:       "transcription",
+			Type: "transcription",
 			Audio: &AudioConfig{
 				Input: &InputConfig{
 					Format: &InputFormat{Type: "audio/pcm", Rate: 24000},

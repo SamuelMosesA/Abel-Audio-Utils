@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -79,11 +80,36 @@ func (m *TranslationManager) ListSessions() []state.SessionInfo {
 	m.Sessions.Range(func(key, value interface{}) bool {
 		lang := key.(string)
 		list = append(list, state.SessionInfo{
-			Language: lang,
+			Language:  lang,
+			Listeners: m.GetListenerCount(lang),
+			Subtitles: true,
 		})
 		return true
 	})
 	return list
+}
+
+func (m *TranslationManager) GetListenerCount(language string) int {
+	code := m.Config.ResolveLanguageCode(language)
+	name := m.Config.ResolveLanguageName(language)
+
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+
+	count := 0
+	if val, ok := m.Subscribers.Load(code); ok {
+		if subs, ok := val.([]chan string); ok {
+			count += len(subs)
+		}
+	}
+	if strings.ToLower(code) != strings.ToLower(name) {
+		if val, ok := m.Subscribers.Load(name); ok {
+			if subs, ok := val.([]chan string); ok {
+				count += len(subs)
+			}
+		}
+	}
+	return count
 }
 
 func (m *TranslationManager) StopSession(language string, subtitles bool) {

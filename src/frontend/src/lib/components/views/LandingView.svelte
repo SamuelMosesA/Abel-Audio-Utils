@@ -13,6 +13,8 @@
   let selectedLang = $state('');
   let qrCodeDataUrl = $state('');
   let wifiSSID = $state('');
+  let displayEndpoint = $state('');
+  let serverUrl = $state('');
 
   function goToAILiveAudio() {
     if (selectedLang) {
@@ -21,19 +23,24 @@
   }
 
   onMount(async () => {
+    let targetUrl = window.location.href;
     try {
       const res = await fetch("/api/system/connection");
       if (res.ok) {
         const data = await res.json();
-        wifiSSID = data.ssid;
+        wifiSSID = data.ssid || '';
+        displayEndpoint = data.displayEndpoint || '';
+        serverUrl = data.serverUrl || '';
+        if (data.serverUrl) {
+          targetUrl = data.serverUrl;
+        }
       }
     } catch (err) {
       console.error("Failed to fetch connection info", err);
     }
 
     try {
-      const url = window.location.href;
-      qrCodeDataUrl = await QRCode.toDataURL(url, {
+      qrCodeDataUrl = await QRCode.toDataURL(targetUrl, {
         margin: 1,
         scale: 6,
         color: {
@@ -97,7 +104,7 @@
       title="Scan to Join"
       description="Scan with your phone camera to open on mobile."
     >
-      <div class="flex flex-col items-center justify-center space-y-4 py-2">
+      <div class="flex flex-col items-center justify-center space-y-3 py-2">
         <div class="p-2 bg-white rounded-lg border border-border shadow-sm">
           {#if qrCodeDataUrl}
             <img src={qrCodeDataUrl} alt="Join QR Code" class="w-32 h-32" />
@@ -107,6 +114,14 @@
             </div>
           {/if}
         </div>
+
+        {#if displayEndpoint}
+          <div class="text-center">
+            <span class="text-xs font-mono font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded border border-border/50">
+              {displayEndpoint}
+            </span>
+          </div>
+        {/if}
 
         {#if wifiSSID && wifiSSID !== 'N/A'}
           <div class="flex items-center gap-1.5 px-3 py-1 rounded-md bg-secondary text-secondary-foreground border border-border text-xs font-medium">

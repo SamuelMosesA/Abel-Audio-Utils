@@ -4,6 +4,16 @@ All notable changes to the Abel Audio Utils project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-10
+
+### Changed
+- **Homebrew Formula Version**: Bumped formula tag in `abel.rb` from `v0.2.0` to `v0.2.1`.
+- **AI Translation Default State**: Disabled and blocked English translation along with all other configured languages by default on startup.
+
+### Fixed
+- **Local Network Host Discovery**: Avoid returning loopback (`127.0.0.1`) and virtual container bridges (`docker0`, `br-*`, `utun*`) by prioritizing physical LAN interface addresses (macOS `en*` and Linux `wlan*`/`eth*`).
+- **SSID Resolution**: Removed redundant and redacted Wi-Fi SSID lookups across macOS and Linux, streamlining endpoint connectivity.
+
 ## [0.2.0] - 2026-10-10
 
 ### Added
@@ -11,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implemented `scripts/abel-service.sh` service wrapper supporting automated Docker daemon startup (macOS Docker Desktop / OrbStack / Colima and Linux systemd).
   - Automated `docker compose up -d` execution for the full observability stack (OpenTelemetry Collector, Loki, Prometheus, Grafana).
   - Deterministic signal trapping (`SIGTERM`, `SIGINT`, `SIGHUP`) on `brew services stop abel`, ensuring graceful shutdown of Abel, teardown of compose containers via `docker compose down`, and Docker daemon stoppage.
-  - Packaged `docker-compose.yaml` and `observability/` configs into Homebrew's `pkgshare`.
+  - Packaged `docker-compose.yaml` and `observability/` configs into Homebrew's `pkgshare` achievements.
 - **In-Memory Progressive MP3 Live Streaming (`009-replace-hls-with-mp3`)**:
   - Replaced disk-based HLS playlist and segmenting with high-throughput, low-latency in-memory MP3 broadcaster (`LiveAudioBroadcaster`).
   - Added concurrent circular chunk ring buffer with zero disk I/O and instant HTTP chunked transfer (`GET /api/audio/stream`).
@@ -58,6 +68,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed pathname JSON serialization in Homebrew formula.
 - **PortAudio Stream Teardown Order**:
   - Fixed audio engine shutdown sequence by enforcing `stream.Stop()` prior to `stream.Close()`, eliminating PortAudio ALSA/CoreAudio termination timeout warnings.
-
-## [0.1.0] - 2026-09-20
-- Initial release of Abel Audio Utils with multi-track audio capture, AI transcription, and translation streaming.

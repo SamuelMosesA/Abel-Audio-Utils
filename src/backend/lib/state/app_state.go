@@ -5,54 +5,12 @@ import (
 	"time"
 
 	pa "github.com/gordonklaus/portaudio"
-	"github.com/gorilla/websocket"
 )
 
 type StateChange struct {
 	SessionID string      `json:"sessionId"`
 	Section   string      `json:"section"`
 	Details   interface{} `json:"details,omitempty"`
-}
-
-type SessionInfo struct {
-	Language  string `json:"language"`
-	Listeners int    `json:"listeners"`
-	Subtitles bool   `json:"subtitles"`
-}
-
-type Translator interface {
-	GetChannel(language string) chan []float32
-	GetSubtitles(language string) (chan string, func())
-	PushAudio(chunk []float32)
-	CloseAll()
-	ListSessions() []SessionInfo
-	StopSession(language string, subtitles bool)
-	SetEnabled(enabled bool)
-	SetOnStateChange(fn func())
-	GetListenerCount(language string) int
-}
-
-// WSClient wraps a websocket connection with a mutex for thread-safe writes.
-type WSClient struct {
-	Conn *websocket.Conn
-	Mu   sync.Mutex
-	Type string // "admin" or "listener"
-}
-
-func (c *WSClient) WriteJSON(v interface{}) error {
-	c.Mu.Lock()
-	defer c.Mu.Unlock()
-	return c.Conn.WriteJSON(v)
-}
-
-func (c *WSClient) WriteMessage(messageType int, data []byte) error {
-	c.Mu.Lock()
-	defer c.Mu.Unlock()
-	return c.Conn.WriteMessage(messageType, data)
-}
-
-func (c *WSClient) Close() error {
-	return c.Conn.Close()
 }
 
 // RecordIntent represents active recording intent and target output parameters.
@@ -129,7 +87,7 @@ func (s *AppState) IsSessionRevoked(sessionID string) bool {
 
 // Getters
 
-func (s *AppState) Config() InterfaceConfig {
+func (s *AppState) Config() AudioEngineUIConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.config.interfaceCfg

@@ -112,6 +112,26 @@ func (p *RecordingProcessor) saveCloudNamesLocked(names map[string]string) error
 	return nil
 }
 
+func (p *RecordingProcessor) findNextCloudFilename(base string, used map[string]bool, reserve bool) (string, error) {
+	for number := 1; ; number++ {
+		candidate := numberedCloudFilename(base, number)
+		if used[candidate] {
+			continue
+		}
+		_, err := os.Lstat(filepath.Join(p.cfg.CloudDriveLocation, candidate))
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			if reserve {
+				return "", fmt.Errorf("check cloud filename: %w", err)
+			}
+			return candidate, nil
+		}
+		return candidate, nil
+	}
+}
+
 // cloudNameFor reserves a destination before pushing. Reservations survive a
 // restart, keeping repeated pushes and library status tied to the same file.
 func (p *RecordingProcessor) cloudNameFor(source, name string, modTime time.Time, reserve bool) (string, error) {
@@ -128,25 +148,9 @@ func (p *RecordingProcessor) cloudNameFor(source, name string, modTime time.Time
 		used[target] = true
 	}
 	base := cloudFilename(source, name, modTime)
-	var target string
-	for number := 1; ; number++ {
-		candidate := numberedCloudFilename(base, number)
-		if used[candidate] {
-			continue
-		}
-		_, err := os.Lstat(filepath.Join(p.cfg.CloudDriveLocation, candidate))
-		if err == nil {
-			continue
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			if reserve {
-				return "", fmt.Errorf("check cloud filename: %w", err)
-			}
-			target = candidate
-			break
-		}
-		target = candidate
-		break
+	target, err := p.findNextCloudFilename(base, used, reserve)
+	if err != nil {
+		return "", err
 	}
 	if reserve {
 		next := make(map[string]string, len(p.cloudNames)+1)

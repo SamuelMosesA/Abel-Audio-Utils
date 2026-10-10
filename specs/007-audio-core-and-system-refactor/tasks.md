@@ -115,10 +115,10 @@
 
 ### Implementation for User Story 5
 
-- [ ] T032 [US5] Audit and decompose large functions into small, explicitly named functions (<40 lines each, Constitution Principle VII), specifically refactoring `src/backend/lib/web/handlers_recordings.go` (start/stop recording flow), `src/backend/lib/web/recording_cloud.go` (cloud sync pipeline), and `src/backend/lib/web/recording_processor.go` (ffmpeg jobs & audio processing pipeline)
-- [ ] T033 [US5] Enforce struct field encapsulation by making mutable internal fields unexported and providing clean accessor methods across `state`, `openai`, and `recording_processor` (Constitution Principle VIII)
-- [ ] T034 [US5] Ensure state models and interface declarations reside in distinctly named, logically separated files in `src/backend/lib/state/` (Constitution Principle VIII)
-- [ ] T035 [US5] Verify that the path from PortAudio engine to recording storage is transparent, modular, and manually verifiable in under 3 minutes (Constitution Principle IX)
+- [x] T032 [US5] Audit and decompose large functions into small, explicitly named functions (<40 lines each, Constitution Principle VII), specifically refactoring `src/backend/lib/web/handlers_recordings.go` (start/stop recording flow), `src/backend/lib/web/recording_cloud.go` (cloud sync pipeline), and `src/backend/lib/web/recording_processor.go` (ffmpeg jobs & audio processing pipeline)
+- [x] T033 [US5] Enforce struct field encapsulation by making mutable internal fields unexported and providing clean accessor methods across `state`, `openai`, and `recording_processor` (Constitution Principle VIII)
+- [x] T034 [US5] Ensure state models and interface declarations reside in distinctly named, logically separated files in `src/backend/lib/state/` (Constitution Principle VIII)
+- [x] T035 [US5] Verify that the path from PortAudio engine to recording storage is transparent, modular, and manually verifiable in under 3 minutes (Constitution Principle IX)
 
 **Checkpoint**: User Story 5 complete — code quality standards and encapsulation strictly satisfied.
 

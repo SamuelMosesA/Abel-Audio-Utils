@@ -90,6 +90,16 @@ func NewRecordingProcessor(cfg *config.Config) *RecordingProcessor {
 	return p
 }
 
+// StorageLocation returns the configured local recording storage directory.
+func (p *RecordingProcessor) StorageLocation() string {
+	return p.cfg.StorageLocation
+}
+
+// CloudLocation returns the configured cloud drive destination directory.
+func (p *RecordingProcessor) CloudLocation() string {
+	return p.cfg.CloudDriveLocation
+}
+
 // SetOnUpdate registers a callback to be invoked when processing state changes.
 func (p *RecordingProcessor) SetOnUpdate(fn func()) {
 	p.mu.Lock()
@@ -180,35 +190,49 @@ func regularFile(path string) (os.FileInfo, error) {
 	return info, nil
 }
 
-func (p *RecordingProcessor) enqueue(source string, start, end float64, autoPush bool) (ProcessingJob, error) {
+func (p *RecordingProcessor) validateManualTrim(stem string, start, end float64) error {
+	processed := stem + "-processed.mp3"
+	if _, err := regularFile(filepath.Join(p.cfg.StorageLocation, processed)); err != nil {
+		return errors.New("process this recording before trimming")
+	}
+	duration, err := p.duration(processed, nil)
+	if err != nil || duration <= 0 {
+		return errors.New("processed MP3 is not readable")
+	}
+	if end > duration+0.05 || start >= duration || (end > 0 && end-start < 0.5) {
+		return errors.New("trim range is outside processed MP3 or shorter than 0.5 seconds")
+	}
+	return nil
+}
+
+func (p *RecordingProcessor) validateEnqueueSource(source string, start, end float64) error {
 	if !validAudioName(source) {
-		return ProcessingJob{}, errors.New("invalid audio filename")
+		return errors.New("invalid audio filename")
 	}
 	sourcePath := filepath.Join(p.cfg.StorageLocation, source)
 	if _, err := regularFile(sourcePath); err != nil {
-		return ProcessingJob{}, fmt.Errorf("recording unavailable: %w", err)
+		return fmt.Errorf("recording unavailable: %w", err)
 	}
 	if duration, err := p.duration(source, nil); err != nil || duration <= 0 {
-		return ProcessingJob{}, errors.New("recording is not finalized or has no audio")
+		return errors.New("recording is not finalized or has no audio")
 	}
 	if math.IsNaN(start) || math.IsInf(start, 0) || start < 0 || math.IsNaN(end) || math.IsInf(end, 0) || end < 0 {
-		return ProcessingJob{}, errors.New("invalid trim range")
+		return errors.New("invalid trim range")
 	}
 	if end > 0 && end <= start {
-		return ProcessingJob{}, errors.New("trim end must exceed start")
+		return errors.New("trim end must exceed start")
+	}
+	return nil
+}
+
+func (p *RecordingProcessor) enqueue(source string, start, end float64, autoPush bool) (ProcessingJob, error) {
+	if err := p.validateEnqueueSource(source, start, end); err != nil {
+		return ProcessingJob{}, err
 	}
 	stem := outputStem(source)
 	if !autoPush {
-		processed := stem + "-processed.mp3"
-		if _, err := regularFile(filepath.Join(p.cfg.StorageLocation, processed)); err != nil {
-			return ProcessingJob{}, errors.New("process this recording before trimming")
-		}
-		duration, err := p.duration(processed, nil)
-		if err != nil || duration <= 0 {
-			return ProcessingJob{}, errors.New("processed MP3 is not readable")
-		}
-		if end > duration+0.05 || start >= duration || (end > 0 && end-start < 0.5) {
-			return ProcessingJob{}, errors.New("trim range is outside processed MP3 or shorter than 0.5 seconds")
+		if err := p.validateManualTrim(stem, start, end); err != nil {
+			return ProcessingJob{}, err
 		}
 	}
 	id := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -237,7 +261,6 @@ func (p *RecordingProcessor) enqueue(source string, start, end float64, autoPush
 		return ProcessingJob{}, errQueueFull
 	}
 }
-
 func (p *RecordingProcessor) update(id, stage string, progress float64, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -414,6 +437,34 @@ func detectEdgeTrimWithProgress(path string, duration float64, progress func(flo
 	return detectEdgeTrimWithContext(context.Background(), path, duration, progress)
 }
 
+func parseSilenceEdges(stderr string, duration float64) (float64, float64) {
+	start, end := 0.0, duration
+	var pending *float64
+	for _, line := range strings.Split(stderr, "\n") {
+		if m := silenceStart.FindStringSubmatch(line); m != nil {
+			value, _ := strconv.ParseFloat(m[1], 64)
+			pending = &value
+		}
+		if m := silenceEnd.FindStringSubmatch(line); m != nil && pending != nil {
+			value, _ := strconv.ParseFloat(m[1], 64)
+			if *pending <= 0.05 && value >= 1 && value <= 300 {
+				start = value
+			}
+			if duration-value <= 0.05 && value-*pending >= 2 && value-*pending <= 300 {
+				end = *pending
+			}
+			pending = nil
+		}
+	}
+	if pending != nil && duration-*pending >= 2 && duration-*pending <= 300 {
+		end = *pending
+	}
+	if end-start < 0.5 {
+		return 0, duration
+	}
+	return start, end
+}
+
 func detectEdgeTrimWithContext(parent context.Context, path string, duration float64, progress func(float64)) (float64, float64, error) {
 	ctx, cancel := context.WithTimeout(parent, 4*time.Hour)
 	defer cancel()
@@ -445,33 +496,9 @@ func detectEdgeTrimWithContext(parent context.Context, path string, duration flo
 	if waitErr != nil {
 		return 0, duration, fmt.Errorf("silence analysis: %w: %s", waitErr, tail(stderr.Bytes()))
 	}
-	start, end := 0.0, duration
-	var pending *float64
-	for _, line := range strings.Split(stderr.String(), "\n") {
-		if m := silenceStart.FindStringSubmatch(line); m != nil {
-			value, _ := strconv.ParseFloat(m[1], 64)
-			pending = &value
-		}
-		if m := silenceEnd.FindStringSubmatch(line); m != nil && pending != nil {
-			value, _ := strconv.ParseFloat(m[1], 64)
-			if *pending <= 0.05 && value >= 1 && value <= 300 {
-				start = value
-			}
-			if duration-value <= 0.05 && value-*pending >= 2 && value-*pending <= 300 {
-				end = *pending
-			}
-			pending = nil
-		}
-	}
-	if pending != nil && duration-*pending >= 2 && duration-*pending <= 300 {
-		end = *pending
-	}
-	if end-start < 0.5 {
-		return 0, duration, nil
-	}
+	start, end := parseSilenceEdges(stderr.String(), duration)
 	return start, end, nil
 }
-
 func tail(data []byte) string {
 	if len(data) > 2048 {
 		data = data[len(data)-2048:]
@@ -483,23 +510,7 @@ func (p *RecordingProcessor) process(job ProcessingJob) error {
 	return p.processWithContext(context.Background(), job)
 }
 
-func (p *RecordingProcessor) processWithContext(ctx context.Context, job ProcessingJob) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	inputName := job.Source
-	if !job.AutoPush {
-		inputName = outputStem(job.Source) + "-processed.mp3"
-	}
-	sourcePath := filepath.Join(p.cfg.StorageLocation, inputName)
-	if _, err := regularFile(sourcePath); err != nil {
-		return err
-	}
-	p.update(job.ID, "analyzing", 0, nil)
-	duration, err := probeDurationWithContext(ctx, sourcePath)
-	if err != nil {
-		return err
-	}
+func (p *RecordingProcessor) resolveTrimBounds(ctx context.Context, job ProcessingJob, sourcePath string, duration float64) (float64, float64, error) {
 	start, end := job.Start, job.End
 	if job.AutoPush {
 		p.mu.Lock()
@@ -507,6 +518,7 @@ func (p *RecordingProcessor) processWithContext(ctx context.Context, job Process
 		current.TotalSeconds = duration
 		p.jobs[job.ID] = current
 		p.mu.Unlock()
+		var err error
 		start, end, err = detectEdgeTrimWithContext(ctx, sourcePath, duration, func(elapsed float64) {
 			p.mu.Lock()
 			current := p.jobs[job.ID]
@@ -516,32 +528,34 @@ func (p *RecordingProcessor) processWithContext(ctx context.Context, job Process
 			p.mu.Unlock()
 		})
 		if err != nil {
-			return err
+			return 0, 0, err
 		}
 	} else if end == 0 {
 		end = duration
 	}
 	if end > duration+0.05 || start >= duration || end-start < 0.5 {
-		return errors.New("trim range is outside recording or shorter than 0.5 seconds")
+		return 0, 0, errors.New("trim range is outside recording or shorter than 0.5 seconds")
 	}
-	outputPath := filepath.Join(p.cfg.StorageLocation, job.Output)
-	defer func() {
-		if ctx.Err() != nil {
-			if err := os.Remove(outputPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-				slog.Warn("could not remove cancelled export", "file", job.Output, "error", err)
-			}
-			if err := p.releaseUnusedCloudName(job.Output); err != nil {
-				slog.Warn("could not release cancelled cloud name", "file", job.Output, "error", err)
-			}
+	return start, end, nil
+}
+
+func (p *RecordingProcessor) trackEncodeProgress(stdout io.Reader, job ProcessingJob, total float64) error {
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if elapsed, ok := parseFFmpegTime(line); ok {
+			p.mu.Lock()
+			current := p.jobs[job.ID]
+			current.ProcessedSeconds = math.Min(total, math.Max(0, elapsed))
+			current.Progress = math.Min(99, math.Max(0, elapsed/total*100))
+			p.jobs[job.ID] = current
+			p.mu.Unlock()
 		}
-	}()
-	tmp, err := os.CreateTemp(p.cfg.StorageLocation, ".abel-processing-*")
-	if err != nil {
-		return err
 	}
-	tmpPath := tmp.Name()
-	tmp.Close()
-	defer os.Remove(tmpPath)
+	return scanner.Err()
+}
+
+func (p *RecordingProcessor) executeFFmpegEncode(ctx context.Context, job ProcessingJob, sourcePath, tmpPath string, start, end float64) error {
 	encodeCtx, cancel := context.WithTimeout(ctx, 4*time.Hour)
 	defer cancel()
 	filter := fmt.Sprintf("atrim=start=%.3f:end=%.3f,asetpts=PTS-STARTPTS", start, end)
@@ -567,19 +581,7 @@ func (p *RecordingProcessor) processWithContext(ctx context.Context, job Process
 	current.TotalSeconds = end - start
 	p.jobs[job.ID] = current
 	p.mu.Unlock()
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if elapsed, ok := parseFFmpegTime(line); ok {
-			p.mu.Lock()
-			current := p.jobs[job.ID]
-			current.ProcessedSeconds = math.Min(end-start, math.Max(0, elapsed))
-			current.Progress = math.Min(99, math.Max(0, elapsed/(end-start)*100))
-			p.jobs[job.ID] = current
-			p.mu.Unlock()
-		}
-	}
-	scanErr := scanner.Err()
+	scanErr := p.trackEncodeProgress(stdout, job, end-start)
 	waitErr := cmd.Wait()
 	if err := ctx.Err(); err != nil {
 		return err
@@ -590,6 +592,9 @@ func (p *RecordingProcessor) processWithContext(ctx context.Context, job Process
 	if waitErr != nil {
 		return fmt.Errorf("ffmpeg: %w: %s", waitErr, tail(stderr.Bytes()))
 	}
+	return nil
+}
+func finalizeMP3File(tmpPath, outputPath string) error {
 	info, err := regularFile(tmpPath)
 	if err != nil || info.Size() == 0 {
 		return errors.New("ffmpeg produced no MP3")
@@ -600,11 +605,68 @@ func (p *RecordingProcessor) processWithContext(ctx context.Context, job Process
 	if err := os.Rename(tmpPath, outputPath); err != nil {
 		return fmt.Errorf("publish MP3: %w", err)
 	}
-	p.update(job.ID, "pushing", 100, nil)
-	if err := p.pushWithContext(ctx, job.Output); err != nil {
+	return nil
+}
+
+func (p *RecordingProcessor) resolveProcessingSource(job ProcessingJob) (string, error) {
+	inputName := job.Source
+	if !job.AutoPush {
+		inputName = outputStem(job.Source) + "-processed.mp3"
+	}
+	sourcePath := filepath.Join(p.cfg.StorageLocation, inputName)
+	if _, err := regularFile(sourcePath); err != nil {
+		return "", err
+	}
+	return sourcePath, nil
+}
+
+func (p *RecordingProcessor) cleanupCancelledExport(ctx context.Context, output, outputPath string) {
+	if ctx.Err() != nil {
+		if err := os.Remove(outputPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("could not remove cancelled export", "file", output, "error", err)
+		}
+		if err := p.releaseUnusedCloudName(output); err != nil {
+			slog.Warn("could not release cancelled cloud name", "file", output, "error", err)
+		}
+	}
+}
+
+func (p *RecordingProcessor) processWithContext(ctx context.Context, job ProcessingJob) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return nil
+	sourcePath, err := p.resolveProcessingSource(job)
+	if err != nil {
+		return err
+	}
+	p.update(job.ID, "analyzing", 0, nil)
+	duration, err := probeDurationWithContext(ctx, sourcePath)
+	if err != nil {
+		return err
+	}
+	start, end, err := p.resolveTrimBounds(ctx, job, sourcePath, duration)
+	if err != nil {
+		return err
+	}
+	outputPath := filepath.Join(p.cfg.StorageLocation, job.Output)
+	defer p.cleanupCancelledExport(ctx, job.Output, outputPath)
+
+	tmp, err := os.CreateTemp(p.cfg.StorageLocation, ".abel-processing-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	if err := p.executeFFmpegEncode(ctx, job, sourcePath, tmpPath, start, end); err != nil {
+		return err
+	}
+	if err := finalizeMP3File(tmpPath, outputPath); err != nil {
+		return err
+	}
+	p.update(job.ID, "pushing", 100, nil)
+	return p.pushWithContext(ctx, job.Output)
 }
 
 func (p *RecordingProcessor) Push(name string) error {
@@ -615,6 +677,65 @@ func (p *RecordingProcessor) Push(name string) error {
 	return err
 }
 
+func streamToFile(ctx context.Context, src io.Reader, tmp *os.File) error {
+	buffer := make([]byte, 1024*1024)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, readErr := src.Read(buffer)
+		if n > 0 {
+			if _, err := tmp.Write(buffer[:n]); err != nil {
+				return fmt.Errorf("copy audio: %w", err)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("read audio: %w", readErr)
+		}
+	}
+	return nil
+}
+
+func copyToCloudLocation(ctx context.Context, srcPath, cloudDir, target string) error {
+	if err := os.MkdirAll(cloudDir, 0755); err != nil {
+		return fmt.Errorf("create cloud directory: %w", err)
+	}
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	tmp, err := os.CreateTemp(cloudDir, ".abel-push-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := streamToFile(ctx, src, tmp); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), filepath.Join(cloudDir, target)); err != nil {
+		return fmt.Errorf("publish cloud copy: %w", err)
+	}
+	return nil
+}
 func (p *RecordingProcessor) pushWithContext(ctx context.Context, name string) error {
 	if !validAudioName(name) {
 		return errInvalidExport
@@ -640,56 +761,8 @@ func (p *RecordingProcessor) pushWithContext(ctx context.Context, name string) e
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(p.cfg.CloudDriveLocation, 0755); err != nil {
-		return fmt.Errorf("create cloud directory: %w", err)
-	}
-	src, err := os.Open(srcPath)
-	if err != nil {
+	if err := copyToCloudLocation(ctx, srcPath, p.cfg.CloudDriveLocation, target); err != nil {
 		return err
-	}
-	defer src.Close()
-	tmp, err := os.CreateTemp(p.cfg.CloudDriveLocation, ".abel-push-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	buffer := make([]byte, 1024*1024)
-	for {
-		if err := ctx.Err(); err != nil {
-			tmp.Close()
-			return err
-		}
-		n, readErr := src.Read(buffer)
-		if n > 0 {
-			if _, err := tmp.Write(buffer[:n]); err != nil {
-				tmp.Close()
-				return fmt.Errorf("copy audio: %w", err)
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			tmp.Close()
-			return fmt.Errorf("read audio: %w", readErr)
-		}
-	}
-	if err := tmp.Chmod(0644); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp.Name(), filepath.Join(p.cfg.CloudDriveLocation, target)); err != nil {
-		return fmt.Errorf("publish cloud copy: %w", err)
 	}
 	slog.Info("audio pushed to cloud", "file", name, "target", target, "cloud", p.cfg.CloudDriveLocation)
 	return nil
@@ -737,14 +810,7 @@ func wavDuration(path string) float64 {
 	return float64(binary.LittleEndian.Uint32(header[40:44])) / float64(byteRate)
 }
 
-func (p *RecordingProcessor) Library() ([]RecordingEntry, error) {
-	dir, err := os.ReadDir(p.cfg.StorageLocation)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []RecordingEntry{}, nil
-		}
-		return nil, err
-	}
+func (p *RecordingProcessor) scanLibraryFiles(dir []os.DirEntry) ([]RecordingEntry, []RecordingExport, error) {
 	entries := make([]RecordingEntry, 0)
 	exports := make([]RecordingExport, 0)
 	for _, file := range dir {
@@ -760,7 +826,7 @@ func (p *RecordingProcessor) Library() ([]RecordingEntry, error) {
 			duration, _ := p.duration(file.Name(), info)
 			rawName, err := p.cloudNameFor(file.Name(), file.Name(), info.ModTime(), false)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			rawCloudPath, rawPushed := cloudCopyPath(p.cfg.CloudDriveLocation,
 				rawName, file.Name(), info.Size(), info.ModTime())
@@ -771,6 +837,10 @@ func (p *RecordingProcessor) Library() ([]RecordingEntry, error) {
 			exports = append(exports, RecordingExport{Name: file.Name(), Size: info.Size(), ModTime: info.ModTime(), Duration: duration})
 		}
 	}
+	return entries, exports, nil
+}
+
+func (p *RecordingProcessor) populateExportsAndJobs(entries []RecordingEntry, exports []RecordingExport) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	for i := range entries {
@@ -779,13 +849,13 @@ func (p *RecordingProcessor) Library() ([]RecordingEntry, error) {
 			if export.Name == stem+"-processed.mp3" || strings.HasPrefix(export.Name, stem+"-trimmed-") {
 				cloudName, err := p.cloudNameFor(entries[i].Name, export.Name, entries[i].ModTime, false)
 				if err != nil {
-					return nil, err
+					return err
 				}
 				path, pushed := cloudCopyPath(p.cfg.CloudDriveLocation, cloudName, export.Name, export.Size, export.ModTime)
-				export.CloudPath = path
-				export.CloudTargetPath = filepath.Join(p.cfg.CloudDriveLocation, cloudName)
-				export.Pushed = pushed
-				entries[i].Exports = append(entries[i].Exports, export)
+			export.CloudPath = path
+			export.CloudTargetPath = filepath.Join(p.cfg.CloudDriveLocation, cloudName)
+			export.Pushed = pushed
+			entries[i].Exports = append(entries[i].Exports, export)
 			}
 		}
 		for _, job := range p.jobs {
@@ -795,6 +865,24 @@ func (p *RecordingProcessor) Library() ([]RecordingEntry, error) {
 		}
 		sort.Slice(entries[i].Exports, func(a, b int) bool { return entries[i].Exports[a].ModTime.After(entries[i].Exports[b].ModTime) })
 		sort.Slice(entries[i].Jobs, func(a, b int) bool { return entries[i].Jobs[a].ID < entries[i].Jobs[b].ID })
+	}
+	return nil
+}
+
+func (p *RecordingProcessor) Library() ([]RecordingEntry, error) {
+	dir, err := os.ReadDir(p.cfg.StorageLocation)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []RecordingEntry{}, nil
+		}
+		return nil, err
+	}
+	entries, exports, err := p.scanLibraryFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.populateExportsAndJobs(entries, exports); err != nil {
+		return nil, err
 	}
 	sort.Slice(entries, func(a, b int) bool { return entries[a].ModTime.After(entries[b].ModTime) })
 	return entries, nil

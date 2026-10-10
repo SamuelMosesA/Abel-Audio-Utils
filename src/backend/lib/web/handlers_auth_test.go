@@ -9,7 +9,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/securecookie"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoginHandler(t *testing.T) {
@@ -195,7 +198,7 @@ func TestLogoutHandlerAndRevocation(t *testing.T) {
 	}
 	router := setupTestRouter(appState, cfg)
 
-	t.Run("Logout with DELETE /api/auth/session revokes token and clears cookie", func(t *testing.T) {
+	t.Run("Logout revokes session and invalidates cookie", func(t *testing.T) {
 		// 1. Log in
 		loginBody, _ := json.Marshal(map[string]string{"username": "admin", "password": "password"})
 		loginReq, _ := http.NewRequest("POST", "/api/auth/session", bytes.NewBuffer(loginBody))
@@ -223,7 +226,7 @@ func TestLogoutHandlerAndRevocation(t *testing.T) {
 		assert.Equal(t, http.StatusOK, logoutRec.Code)
 		var logoutResp map[string]string
 		json.Unmarshal(logoutRec.Body.Bytes(), &logoutResp)
-		assert.Equal(t, "logged_out", logoutResp["status"])
+		assert.Equal(t, "success", logoutResp["status"])
 
 		// Verify cookie was cleared
 		clearedCookie := logoutRec.Header().Get("Set-Cookie")
@@ -246,5 +249,49 @@ func TestLogoutHandlerAndRevocation(t *testing.T) {
 		logoutRec := httptest.NewRecorder()
 		router.ServeHTTP(logoutRec, logoutReq)
 		assert.Equal(t, http.StatusOK, logoutRec.Code)
+	})
+}
+
+func TestCookieSanitizerMiddleware(t *testing.T) {
+	secret := []byte("secret-key-32-bytes-long-1234567")
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(CookieSanitizerMiddleware("abel_session", secret))
+	r.GET("/test", func(c *gin.Context) {
+		cookie, err := c.Request.Cookie("abel_session")
+		if err != nil {
+			c.String(http.StatusOK, "no-cookie")
+			return
+		}
+		c.String(http.StatusOK, cookie.Value)
+	})
+
+	t.Run("Strips and clears invalid cookie", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/test", nil)
+		req.AddCookie(&http.Cookie{Name: "abel_session", Value: "invalid-tampered-cookie"})
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "no-cookie", w.Body.String())
+		// Confirms Set-Cookie was sent to delete it on client
+		setCookie := w.Header().Get("Set-Cookie")
+		assert.Contains(t, setCookie, "abel_session=")
+	})
+
+	t.Run("Preserves valid signed cookie", func(t *testing.T) {
+		codec := securecookie.New(secret, nil)
+		encoded, err := codec.Encode("abel_session", map[interface{}]interface{}{"user": "admin"})
+		require.NoError(t, err)
+
+		req, _ := http.NewRequest("GET", "/test", nil)
+		req.AddCookie(&http.Cookie{Name: "abel_session", Value: encoded})
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, encoded, w.Body.String())
+		// Ensure deletion header is not set for valid cookies
+		assert.Empty(t, w.Header().Get("Set-Cookie"))
 	})
 }

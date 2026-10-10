@@ -68,6 +68,7 @@ func NewRouter(appState *state.AppState, cfg *config.Config, broadcaster *audio_
 		Secure:   false, // Set to true if using HTTPS
 		SameSite: http.SameSiteLaxMode,
 	})
+	r.Use(CookieSanitizerMiddleware("abel_session", sessionSecret))
 	r.Use(sessions.Sessions("abel_session", store))
 
 	subFS, _ := fs.Sub(staticFiles, "static")

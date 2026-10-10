@@ -25,6 +25,7 @@ func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, 
 	r := gin.Default()
 	sessionSecret, _ := config.ResolveSessionSecret(cfg)
 	store := cookie.NewStore(sessionSecret)
+	r.Use(CookieSanitizerMiddleware("abel_session", sessionSecret))
 	r.Use(sessions.Sessions("abel_session", store))
 
 	// Mock auth session if header is present

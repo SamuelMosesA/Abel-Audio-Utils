@@ -21,15 +21,15 @@ Abel (anti-babel) is a high-performance, web-based audio recording, AI translati
 - **Go**: 1.25 or higher
 - **Node.js & npm**: For building the frontend
 - **PortAudio**: Development headers for audio I/O
-  - macOS: `brew install portaudio`
-  - Linux: `sudo apt-get install portaudio19-dev`
-- **FFmpeg and FFprobe**: Runtime AAC/HLS packaging and recording processing. Requires the `libmp3lame` encoder and the `dynaudnorm` and `loudnorm` filters.
-  - macOS: `brew install ffmpeg` includes FFprobe and all required encoders and filters; no custom build is needed.
+  - macOS: `sudo port install portaudio`
+  - Linux: `sudo apt-get install portaudio19-dev` (or distro equivalent)
+- **FFmpeg and FFprobe**: Runtime recording processing and streaming
+  - macOS: `sudo port install ffmpeg`
   - Linux: `sudo apt-get install ffmpeg`
 
 ## Installation & Setup
 
-### Local Development
+### Local Development (All Platforms)
 
 1. **Clone the repository**:
    ```bash
@@ -38,30 +38,67 @@ Abel (anti-babel) is a high-performance, web-based audio recording, AI translati
    ```
 
 2. **Run the Dev Script**:
-   Run the local helper script to package, compile, and start the app using Homebrew:
+   Builds the SvelteKit frontend, compiles the Go backend binary, initializes `~/.config/abel/config.yaml` if missing, and starts the server directly:
    ```bash
    ./dev.sh
    ```
-   This script packages the source code, runs `brew install --build-from-source ./abel.rb`, sets up a config template at `~/.config/abel/config.yaml` if not present, and starts the `abel` server.
 
-### Native Installation (Homebrew)
+### macOS Installation (MacPorts)
 
-Install via your custom Homebrew Tap:
+#### Option 1: Automated Installer (Recommended)
+Run the automated installation script, which installs all required dependencies via MacPorts, sets up Docker/Colima, compiles Abel, and enables Abel as an autostart background service on boot (`launchd`):
+
 ```bash
-brew tap SamuelMosesA/Abel-Audio-Utils
-brew install SamuelMosesA/Abel-Audio-Utils/abel
+./scripts/install-macports.sh
 ```
 
-Start the application as a background service:
+#### Option 2: Manual Installation
+Install all dependencies via MacPorts:
 ```bash
-brew services start abel
+sudo port install go nodejs20 npm10 pkgconfig ffmpeg portaudio docker docker-compose-plugin colima
 ```
-Configure it by copying the template config to your user directory:
+
+Install Abel using the Portfile:
 ```bash
-mkdir -p ~/.config/abel
-cp /opt/homebrew/etc/abel/config.yaml ~/.config/abel/config.yaml
+# From within the repository directory:
+sudo port install
 ```
-Then edit `~/.config/abel/config.yaml`.
+
+Start Abel as a background service with launchd:
+```bash
+sudo port load abel
+```
+
+To stop the service:
+```bash
+sudo port unload abel
+```
+
+Configure by editing `/opt/local/etc/abel/config.yaml` or `~/.config/abel/config.yaml`.
+
+### Linux Installation (Native Makefile & systemd)
+
+Build and install to `/usr/local`:
+```bash
+sudo make install
+```
+
+Install and start the systemd background service:
+```bash
+sudo make enable-systemd
+```
+
+Check status and logs:
+```bash
+sudo systemctl status abel
+journalctl -u abel -f
+```
+
+To stop or uninstall:
+```bash
+sudo systemctl stop abel
+sudo make uninstall
+```
 
 ## Usage
 
@@ -74,7 +111,7 @@ Then edit `~/.config/abel/config.yaml`.
 
 2. **Run the Server**:
    ```bash
-   brew services start abel
+   sudo port load abel # (macOS) or: sudo systemctl start abel (Linux)
    ```
    The application strictly loads the configuration from your user home directory `~/.config/abel/config.yaml`.
 

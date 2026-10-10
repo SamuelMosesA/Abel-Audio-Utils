@@ -4,39 +4,35 @@ set -e
 # Change to script directory
 cd "$(dirname "$0")"
 
-# Ensure brew is in PATH
-for path in /home/linuxbrew/.linuxbrew/bin/brew /opt/homebrew/bin/brew /usr/local/bin/brew; do
-    [ -x "$path" ] && eval "$($path shellenv)" && break
-done
-command -v brew &>/dev/null || { echo "Homebrew not found!"; exit 1; }
+# Check required build tools
+command -v go &>/dev/null || { echo "Go not found! Please install Go 1.25+"; exit 1; }
+command -v node &>/dev/null || { echo "Node.js not found! Please install Node.js 20+"; exit 1; }
+command -v npm &>/dev/null || { echo "npm not found! Please install npm"; exit 1; }
 
-# Package source code
-export ABEL_DEV_TARBALL="${ABEL_DEV_TARBALL:-/tmp/abel-source.tar.gz}"
-trap 'rm -f "$ABEL_DEV_TARBALL"' EXIT
-echo "==> Packaging source code..."
-tar -czf "$ABEL_DEV_TARBALL" --exclude=.go --exclude=node_modules --exclude=src/frontend/node_modules .
+# Build frontend
+echo "==> Building frontend..."
+cd src/frontend
+npm install
+npm run build
+cd ../..
 
-# Ensure local tap exists
-TAP_DIR="$(brew --repository local/abel 2>/dev/null || true)"
-if [ -z "$TAP_DIR" ] || [ ! -d "$TAP_DIR" ]; then
-    echo "==> Initializing local Homebrew tap..."
-    brew tap-new local/abel
-    TAP_DIR="$(brew --repository local/abel)"
-fi
+# Copy built assets to backend static directory
+echo "==> Syncing static assets..."
+mkdir -p src/backend/static
+rm -rf src/backend/static/*
+cp -r src/frontend/build/* src/backend/static/
 
-# Copy and patch formula in the tap to use local tarball
-mkdir -p "$TAP_DIR/Formula"
-cp ./abel.rb "$TAP_DIR/Formula/abel.rb"
-SHA_SUM=$(sha256sum "$ABEL_DEV_TARBALL" | awk '{print $1}')
-ruby -i -pe "sub(/url \".*\", tag: \".*\"/, \"url \\\"file://$ABEL_DEV_TARBALL\\\"\\n  sha256 \\\"$SHA_SUM\\\"\\n  version \\\"1.0.0-dev\\\"\")" "$TAP_DIR/Formula/abel.rb"
+# Build backend
+echo "==> Building backend..."
+mkdir -p bin
+go build -o bin/abel src/backend/main.go
 
-# Reinstall/install from the local tap
-echo "==> Installing/updating Abel via Homebrew..."
-if brew list local/abel/abel &>/dev/null; then
-    brew reinstall --build-from-source local/abel/abel
-else
-    brew install --build-from-source local/abel/abel
+# Ensure user config directory and default config exist
+mkdir -p "$HOME/.config/abel"
+if [ ! -f "$HOME/.config/abel/config.yaml" ]; then
+    echo "==> Generating default config at ~/.config/abel/config.yaml..."
+    cp config/config-example.yaml "$HOME/.config/abel/config.yaml"
 fi
 
 echo "==> Starting Abel server..."
-exec abel
+exec ./bin/abel

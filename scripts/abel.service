@@ -1,0 +1,21 @@
+[Unit]
+Description=Abel Audio Utils Service
+After=network.target sound.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=abel
+Group=abel
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ExecStart=/usr/local/bin/abel-service
+Restart=always
+RestartSec=5s
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

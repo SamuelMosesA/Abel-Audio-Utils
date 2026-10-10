@@ -4,6 +4,32 @@
 
 set -e
 
+# Ensure full standard PATH is available across MacPorts and system paths (crucial for launchd/systemd at boot)
+export PATH="/opt/local/bin:/opt/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+# Auto-detect standard Docker sockets if DOCKER_HOST is not explicitly configured
+detect_docker_socket() {
+    if [ -n "$DOCKER_HOST" ]; then
+        return 0
+    fi
+    if [ -S "$HOME/.colima/default/docker.sock" ]; then
+        export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+    elif [ -S "/var/run/docker.sock" ]; then
+        export DOCKER_HOST="unix:///var/run/docker.sock"
+    elif [ -S "$HOME/.docker/run/docker.sock" ]; then
+        export DOCKER_HOST="unix://$HOME/.docker/run/docker.sock"
+    else
+        # If running as root under launchd/daemon, look for active user's socket in /Users/*/
+        for user_sock in /Users/*/.colima/default/docker.sock /Users/*/.docker/run/docker.sock; do
+            if [ -S "$user_sock" ]; then
+                export DOCKER_HOST="unix://$user_sock"
+                break
+            fi
+        done
+    fi
+}
+detect_docker_socket
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Locate Abel binary
@@ -13,6 +39,10 @@ elif [ -x "$SCRIPT_DIR/abel" ]; then
     BINARY="$SCRIPT_DIR/abel"
 elif command -v abel >/dev/null 2>&1; then
     BINARY="$(command -v abel)"
+elif [ -x "/opt/local/bin/abel" ]; then
+    BINARY="/opt/local/bin/abel"
+elif [ -x "/usr/local/bin/abel" ]; then
+    BINARY="/usr/local/bin/abel"
 else
     echo "[abel-service] ERROR: Unable to locate 'abel' executable." >&2
     exit 1
@@ -23,8 +53,9 @@ COMPOSE_FILE=""
 CANDIDATE_PATHS=(
     "$ABEL_COMPOSE_FILE"
     "$SCRIPT_DIR/../share/abel/docker-compose.yaml"
-    "/opt/homebrew/share/abel/docker-compose.yaml"
+    "/opt/local/share/abel/docker-compose.yaml"
     "/usr/local/share/abel/docker-compose.yaml"
+    "/usr/share/abel/docker-compose.yaml"
     "$SCRIPT_DIR/../docker-compose.yaml"
     "$SCRIPT_DIR/docker-compose.yaml"
     "./docker-compose.yaml"
@@ -54,6 +85,7 @@ start_docker_daemon() {
             open -a OrbStack 2>/dev/null || true
         elif command -v colima >/dev/null 2>&1; then
             colima start 2>/dev/null || true
+            detect_docker_socket
         fi
     elif [ "$OS_TYPE" = "Linux" ]; then
         if systemctl --user is-enabled docker >/dev/null 2>&1 || systemctl --user status docker >/dev/null 2>&1; then
@@ -68,6 +100,7 @@ start_docker_daemon() {
     # Wait up to 30 seconds for Docker daemon
     local elapsed=0
     while [ $elapsed -lt 30 ]; do
+        detect_docker_socket
         if is_docker_responsive; then
             echo "[abel-service] Docker daemon started successfully."
             return 0

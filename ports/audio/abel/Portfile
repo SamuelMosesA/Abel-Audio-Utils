@@ -1,0 +1,78 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+# Portfile for Abel
+
+PortSystem          1.0
+PortGroup           github 1.0
+
+github.setup        SamuelMosesA Abel-Audio-Utils 2.1 v
+revision            0
+categories          audio
+platforms           darwin
+license             MIT
+maintainers         nomaintainer
+
+description         Audio recorder with AI transcription, translation & live streaming
+long_description    Abel (anti-babel) is a high-performance audio recording, \
+                    AI transcription, translation and live streaming proxy \
+                    designed for professional USB audio interfaces.
+
+depends_build       port:go \
+                    port:nodejs20 \
+                    port:npm10 \
+                    port:pkgconfig
+
+depends_lib         path:bin/ffmpeg:ffmpeg \
+                    port:portaudio
+
+use_configure       no
+
+build {
+    # 1. Build frontend
+    system -W ${worksrcpath}/src/frontend "npm install && npm run build"
+
+    # 2. Sync frontend static assets into backend
+    xinstall -m 755 -d ${worksrcpath}/src/backend/static
+    eval file delete [glob -nocomplain ${worksrcpath}/src/backend/static/*]
+    eval file copy [glob ${worksrcpath}/src/frontend/build/*] ${worksrcpath}/src/backend/static/
+
+    # 3. Build backend binary
+    system -W ${worksrcpath} "go build -o bin/abel src/backend/main.go"
+}
+
+destroot {
+    # Install binaries
+    xinstall -m 755 ${worksrcpath}/bin/abel ${destroot}${prefix}/bin/abel
+    xinstall -m 755 ${worksrcpath}/scripts/abel-service.sh ${destroot}${prefix}/bin/abel-service
+
+    # Install configuration template
+    xinstall -m 755 -d ${destroot}${prefix}/etc/abel
+    xinstall -m 644 ${worksrcpath}/config/config-example.yaml ${destroot}${prefix}/etc/abel/config.yaml.sample
+
+    # Install shared assets (docker-compose & observability configs)
+    xinstall -m 755 -d ${destroot}${prefix}/share/abel
+    xinstall -m 644 ${worksrcpath}/docker-compose.yaml ${destroot}${prefix}/share/abel/
+    file copy ${worksrcpath}/observability ${destroot}${prefix}/share/abel/
+}
+
+startupitem.create      yes
+startupitem.name        abel
+startupitem.executable  ${prefix}/bin/abel-service
+startupitem.pidfile     none
+startupitem.logdir      ${prefix}/var/log/abel
+
+post-activate {
+    if {![file exists ${prefix}/etc/abel/config.yaml]} {
+        copy ${prefix}/etc/abel/config.yaml.sample ${prefix}/etc/abel/config.yaml
+    }
+}
+
+notes "
+To configure Abel, edit:
+  ${prefix}/etc/abel/config.yaml (or ~/.config/abel/config.yaml)
+
+To start the Abel service:
+  sudo port load abel
+
+To stop the service:
+  sudo port unload abel
+"

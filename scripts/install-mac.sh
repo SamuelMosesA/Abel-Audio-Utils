@@ -158,10 +158,20 @@ else
     log_info "Docker is already installed."
 fi
 
-# Ensure Docker command line symlinks are available
-if [ -d "/Applications/Docker.app" ] && ! command -v docker >/dev/null 2>&1; then
+# Ensure Docker command line symlinks and default socket are available
+if [ -d "/Applications/Docker.app" ]; then
+    log_info "Configuring Docker CLI binaries and system paths..."
     sudo ln -sf /Applications/Docker.app/Contents/Resources/bin/docker /usr/local/bin/docker || true
     sudo ln -sf /Applications/Docker.app/Contents/Resources/bin/docker-compose /usr/local/bin/docker-compose || true
+    sudo ln -sf /Applications/Docker.app/Contents/Resources/bin/docker-compose /usr/local/bin/docker-compose-v1 2>/dev/null || true
+    
+    # Enable system socket link if user docker.sock exists
+    for sock in "$HOME/.docker/run/docker.sock" /Users/*/.docker/run/docker.sock; do
+        if [ -S "$sock" ]; then
+            sudo ln -sf "$sock" /var/run/docker.sock 2>/dev/null || true
+            break
+        fi
+    done
 fi
 
 # 7. Build Abel (Frontend + Backend) and install to /usr/local

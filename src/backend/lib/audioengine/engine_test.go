@@ -242,6 +242,33 @@ func TestConcurrentRestartAndStopEngine(t *testing.T) {
 	assert.False(t, appState.Engine().IsRunning())
 }
 
+func TestStopAudioEngineWithReadErrors(t *testing.T) {
+	appState := state.NewAppState("", "")
+	appState.Devices = []*pa.DeviceInfo{{Name: "Faulty Device", MaxInputChannels: 2}}
+	cfg := &config.Config{BufferSize: 2, SampleRate: 44100}
+
+	streamer := &MockStreamer{
+		OpenStreamFunc: func(params pa.StreamParameters, args ...interface{}) (PortAudioStream, error) {
+			return &MockStream{
+				ReadFunc: func() error {
+					time.Sleep(5 * time.Millisecond)
+					return errors.New("input underflow / read error")
+				},
+			}, nil
+		},
+	}
+
+	err := StartAudioEngine(streamer, appState, cfg, 0, nil, nil)
+	require.NoError(t, err)
+	assert.True(t, appState.Engine().IsRunning())
+
+	time.Sleep(20 * time.Millisecond)
+
+	err = StopAudioEngine(appState)
+	assert.NoError(t, err)
+	assert.False(t, appState.Engine().IsRunning())
+}
+
 type closeTrackingStream struct {
 	MockStream
 	closed *atomic.Bool

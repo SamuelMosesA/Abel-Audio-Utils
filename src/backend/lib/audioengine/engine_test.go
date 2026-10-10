@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ type MockStream struct {
 }
 
 func (m *MockStream) Start() error { return nil }
-func (m *MockStream) Stop() error { return nil }
+func (m *MockStream) Stop() error  { return nil }
 func (m *MockStream) Close() error { return nil }
 func (m *MockStream) Read() error {
 	if m.ReadFunc != nil {
@@ -49,10 +50,10 @@ func TestEngineAudioProcessing(t *testing.T) {
 	})
 	appState.Devices = []*pa.DeviceInfo{{Name: "Test", MaxInputChannels: 2}}
 	cfg := &config.Config{BufferSize: 2, SampleRate: 44100}
-	
+
 	recordChan := make(chan []float32, 1)
 	playbackChan := make(chan []float32, 1)
-	
+
 	mockStreamer := &MockStreamer{
 		OpenStreamFunc: func(params pa.StreamParameters, args ...interface{}) (PortAudioStream, error) {
 			in := args[0].([]float32)
@@ -81,12 +82,12 @@ func TestEngineAudioProcessing(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timeout waiting for audio chunk")
 	}
-	
-	// Close engine
-	close(appState.QuitAudio)
-	time.Sleep(100 * time.Millisecond)
-}
 
+	// Close engine cleanly
+	err = StopAudioEngine(appState)
+	assert.NoError(t, err)
+	assert.False(t, appState.Engine().IsRunning())
+}
 
 func TestStartAudioEngineRejectsInvalidDevice(t *testing.T) {
 	appState := state.NewAppState("", "")
@@ -134,7 +135,6 @@ func TestRestartEngineReconnectsByNameAndReloadsConfig(t *testing.T) {
 		s.SetIsRunning(true)
 		s.SetDeviceID(1)
 		s.SetChL(1)
-		s.SetBoost(1.0)
 	})
 
 	var streamClosed atomic.Bool
@@ -158,9 +158,7 @@ func TestRestartEngineReconnectsByNameAndReloadsConfig(t *testing.T) {
 	result, err := RestartEngine(streamer, appState, cfg)
 	require.NoError(t, err)
 	defer func() {
-		if appState.QuitAudio != nil {
-			close(appState.QuitAudio)
-		}
+		_ = StopAudioEngine(appState)
 	}()
 
 	assert.Equal(t, []AudioDevice{
@@ -208,6 +206,40 @@ func TestRestartEngineFailsWhenAudioReinitFails(t *testing.T) {
 
 	_, err := RestartEngine(&MockStreamer{}, appState, &config.Config{})
 	assert.ErrorContains(t, err, "host error")
+	assert.False(t, appState.Config().IsRunning(), "engine state must be stopped on reinit error")
+	assert.Equal(t, int32(-1), appState.Config().DeviceID())
+}
+
+func TestConcurrentRestartAndStopEngine(t *testing.T) {
+	appState := state.NewAppState("", "")
+	appState.Devices = []*pa.DeviceInfo{
+		{Name: "Test Device", MaxInputChannels: 2},
+	}
+	cfg := &config.Config{BufferSize: 2, SampleRate: 44100}
+
+	stubPortAudio(t, func() error {
+		time.Sleep(5 * time.Millisecond)
+		return nil
+	}, []*pa.DeviceInfo{{Name: "Test Device", MaxInputChannels: 2}})
+
+	streamer := &MockStreamer{
+		OpenStreamFunc: func(params pa.StreamParameters, args ...interface{}) (PortAudioStream, error) {
+			return &MockStream{}, nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = RestartEngine(streamer, appState, cfg)
+		}()
+	}
+	wg.Wait()
+
+	_ = StopAudioEngine(appState)
+	assert.False(t, appState.Engine().IsRunning())
 }
 
 type closeTrackingStream struct {

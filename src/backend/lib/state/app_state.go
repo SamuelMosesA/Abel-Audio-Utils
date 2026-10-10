@@ -58,7 +58,7 @@ type RecordIntent struct {
 	isRecording bool
 }
 
-func (i RecordIntent) IsRecording() bool { return i.isRecording }
+func (i RecordIntent) IsRecording() bool    { return i.isRecording }
 func (i *RecordIntent) SetRecording(b bool) { i.isRecording = b }
 
 type StaticLocations struct {
@@ -73,16 +73,17 @@ func (l StaticLocations) CloudDrive() string { return l.cloudDrive }
 type AppState struct {
 	mu sync.RWMutex
 
-	config  configState
-	engine  EngineState
-	intent  RecordIntent
-	static  StaticLocations
-	
+	config configState
+	engine EngineState
+	intent RecordIntent
+	static StaticLocations
+
 	// Channels and specialized maps remain here for now
 	Clients         sync.Map // map[*WSClient]bool
 	AdminClient     *WSClient
 	MasterSessionID string
 	QuitAudio       chan bool
+	DoneAudio       chan struct{}
 
 	RecordChan   chan []float32
 	PlaybackChan chan []float32
@@ -90,7 +91,7 @@ type AppState struct {
 	StreamChannels sync.Map // map[chan []float32]bool
 	BroadcastHub   sync.Map // map[chan StateChange]bool
 
-	Devices []*pa.DeviceInfo
+	Devices    []*pa.DeviceInfo
 	Translator Translator
 }
 

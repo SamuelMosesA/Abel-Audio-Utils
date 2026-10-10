@@ -7,10 +7,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	pa "github.com/gordonklaus/portaudio"
 )
+
+// engineMu serializes all PortAudio initialization, termination, stream creation,
+// and engine restart operations across the entire application.
+var engineMu sync.Mutex
 
 // PortAudio hooks, replaced in tests.
 var (
@@ -31,9 +36,40 @@ type RestartResult struct {
 	ConfigError string        `json:"configError,omitempty"`
 }
 
+// StopAudioEngine stops the active audio engine goroutine and awaits stream teardown.
+func StopAudioEngine(appState *state.AppState) error {
+	if q := appState.QuitAudio; q != nil {
+		close(q)
+		appState.QuitAudio = nil
+	}
+
+	done := appState.DoneAudio
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			slog.Warn("Audio engine did not terminate within timeout")
+		}
+		appState.DoneAudio = nil
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for appState.Engine().IsRunning() {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("audio engine did not stop in time")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return nil
+}
+
 // RestartEngine re-scans audio devices so hardware connected after startup appears,
 // reloads config.yaml and the credentials file, and reconnects to the previous device.
 func RestartEngine(streamer AudioStreamer, appState *state.AppState, cfg *config.Config) (RestartResult, error) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
 	// Device IDs are list positions that shift when hardware changes, so remember the name.
 	previous := ""
 	if conf := appState.Config(); conf.IsRunning() && conf.DeviceID() >= 0 && int(conf.DeviceID()) < len(appState.Devices) {
@@ -41,7 +77,11 @@ func RestartEngine(streamer AudioStreamer, appState *state.AppState, cfg *config
 	}
 
 	if err := refreshDevices(appState); err != nil {
-		return RestartResult{}, err
+		state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+			s.SetIsRunning(false)
+			s.SetDeviceID(-1)
+		})
+		return RestartResult{DeviceID: -1}, err
 	}
 
 	result := RestartResult{DeviceID: -1}
@@ -59,7 +99,7 @@ func RestartEngine(streamer AudioStreamer, appState *state.AppState, cfg *config
 
 	for i, d := range appState.Devices {
 		if previous != "" && d.Name == previous {
-			if err := StartAudioEngine(streamer, appState, cfg, i, appState.RecordChan, appState.PlaybackChan); err == nil {
+			if err := startAudioEngineLocked(streamer, appState, cfg, i, appState.RecordChan, appState.PlaybackChan); err == nil {
 				result.DeviceID, result.Reconnected = i, previous
 			}
 			break
@@ -83,20 +123,10 @@ func RestartEngine(streamer AudioStreamer, appState *state.AppState, cfg *config
 }
 
 // refreshDevices stops the engine and re-initializes PortAudio, which only
-// enumerates devices in Initialize.
+// enumerates devices in Initialize. Caller must hold engineMu.
 func refreshDevices(appState *state.AppState) error {
-	if q := appState.QuitAudio; q != nil {
-		close(q)
-		appState.QuitAudio = nil
-	}
-	// The engine goroutine clears the running flag only after closing its stream,
-	// and PortAudio must not be terminated while a stream is open.
-	deadline := time.Now().Add(2 * time.Second)
-	for appState.Engine().IsRunning() {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("audio engine did not stop in time")
-		}
-		time.Sleep(10 * time.Millisecond)
+	if err := StopAudioEngine(appState); err != nil {
+		return err
 	}
 
 	if err := reinitPortAudio(); err != nil {
@@ -117,6 +147,12 @@ func refreshDevices(appState *state.AppState) error {
 }
 
 func StartAudioEngine(streamer AudioStreamer, appState *state.AppState, cfg *config.Config, deviceID int, recordChan chan<- []float32, playbackChan chan<- []float32) error {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	return startAudioEngineLocked(streamer, appState, cfg, deviceID, recordChan, playbackChan)
+}
+
+func startAudioEngineLocked(streamer AudioStreamer, appState *state.AppState, cfg *config.Config, deviceID int, recordChan chan<- []float32, playbackChan chan<- []float32) error {
 	if streamer == nil {
 		streamer = &PADriver{}
 	}
@@ -127,19 +163,21 @@ func StartAudioEngine(streamer AudioStreamer, appState *state.AppState, cfg *con
 	}
 	dev := devices[deviceID]
 
-	if q := appState.QuitAudio; q != nil {
-		close(q)
-		appState.QuitAudio = nil
-		time.Sleep(100 * time.Millisecond)
+	if err := StopAudioEngine(appState); err != nil {
+		return err
 	}
+
 	quit := make(chan bool)
+	done := make(chan struct{})
 	appState.QuitAudio = quit
+	appState.DoneAudio = done
 	appState.Engine().SetRunning(true)
 
 	// Engine GoRoutine
 	logger := slog.With("component", "audio")
 	go func() {
 		logger.Info("Audio engine started", slog.String("device", dev.Name))
+		defer close(done)
 		defer logger.Info("Audio engine stopped")
 		defer func() { appState.Engine().SetRunning(false) }()
 		defer func() {
@@ -223,7 +261,12 @@ func StartAudioEngine(streamer AudioStreamer, appState *state.AppState, cfg *con
 			startTime := time.Now()
 
 			if err := stream.Read(); err != nil {
-				continue
+				select {
+				case <-quit:
+					return
+				default:
+					continue
+				}
 			}
 
 			// Read current interface config once per loop

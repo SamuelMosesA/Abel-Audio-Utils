@@ -13,31 +13,136 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetLocalIP returns the machine's primary non-loopback IPv4 address on the local network.
-func GetLocalIP() string {
-	// 1. Ask OS routing table for the local address used for outbound traffic
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err == nil {
-		defer conn.Close()
-		if udpAddr, ok := conn.LocalAddr().(*net.UDPAddr); ok && !udpAddr.IP.IsLoopback() {
-			if ip4 := udpAddr.IP.To4(); ip4 != nil {
-				return ip4.String()
-			}
+// isVirtualInterface returns true if the interface name indicates a virtual, container, or tunnel interface.
+func isVirtualInterface(name string) bool {
+	name = strings.ToLower(name)
+	virtualPrefixes := []string{
+		"docker", "br-", "veth", "virbr", "dummy", // Linux containers / bridges
+		"tun", "tap", "tailscale", "wg", // VPNs & tunnels
+		"utun", "awdl", "llw", "bridge", "gif", "stf", // macOS virtual & internal
+		"vmnet", "vboxnet", // Virtualization
+	}
+	for _, p := range virtualPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
 		}
 	}
+	return false
+}
 
-	// 2. Fallback: inspect network interface addresses for first non-loopback IPv4
-	addrs, err := net.InterfaceAddrs()
-	if err == nil {
-		for _, addr := range addrs {
-			if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
-				if ip4 := ipNet.IP.To4(); ip4 != nil {
+// isPhysicalInterface returns true if the interface name matches common physical LAN/WLAN interfaces.
+func isPhysicalInterface(name string) bool {
+	name = strings.ToLower(name)
+	physicalPrefixes := []string{
+		"en", "eth", "wlan", "wl", "eno", "ens", "enp",
+	}
+	for _, p := range physicalPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// scoreIPv4 calculates a preference score for an IPv4 candidate address.
+// Higher scores represent better candidates for mobile/LAN client connectivity.
+// Negative scores represent unusable addresses (e.g., loopback, unspecified).
+func scoreIPv4(ip net.IP, iface net.Interface) int {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return -1
+	}
+	if ip4.IsLoopback() || ip4[0] == 127 || ip4.IsUnspecified() || ip4[0] == 0 {
+		return -1
+	}
+
+	isUp := (iface.Flags & net.FlagUp) != 0
+	isPhys := isPhysicalInterface(iface.Name)
+	isVirt := isVirtualInterface(iface.Name)
+	isLinkLocal := ip4.IsLinkLocalUnicast() || (ip4[0] == 169 && ip4[1] == 254)
+
+	baseScore := 0
+	if isPhys && !isVirt {
+		baseScore += 50
+	} else if !isVirt {
+		baseScore += 30
+	}
+
+	if isUp {
+		baseScore += 20
+	}
+
+	// Prefer standard private subnets commonly used for routers and LANs
+	if ip4[0] == 192 && ip4[1] == 168 {
+		return baseScore + 40
+	}
+	if ip4[0] == 10 {
+		return baseScore + 35
+	}
+	if ip4[0] == 172 && (ip4[1] >= 16 && ip4[1] <= 31) && !isVirt {
+		return baseScore + 30
+	}
+	if !isLinkLocal {
+		return baseScore + 20
+	}
+	// Link-local fallback (still preferred over loopback)
+	return baseScore + 5
+}
+
+// GetLocalIP returns the machine's primary non-loopback IPv4 address on the local network.
+// It prioritizes physical LAN interfaces and avoids loopback (127.0.0.1) as much as possible.
+func GetLocalIP() string {
+	// 1. First attempt: Ask OS routing table for the local outbound address to well-known targets
+	for _, target := range []string{"8.8.8.8:80", "1.1.1.1:80"} {
+		conn, err := net.DialTimeout("udp", target, 200*time.Millisecond)
+		if err == nil {
+			localAddr, ok := conn.LocalAddr().(*net.UDPAddr)
+			conn.Close()
+			if ok && localAddr.IP != nil {
+				ip4 := localAddr.IP.To4()
+				if ip4 != nil && !ip4.IsLoopback() && ip4[0] != 127 && !(ip4[0] == 169 && ip4[1] == 254) {
 					return ip4.String()
 				}
 			}
 		}
 	}
 
+	// 2. Second attempt: Rank all available network interfaces to find the best physical LAN IPv4
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		bestIP := ""
+		bestScore := -1
+
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				var ip net.IP
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				score := scoreIPv4(ip, iface)
+				if score > bestScore {
+					bestScore = score
+					bestIP = ip.To4().String()
+				}
+			}
+		}
+
+		if bestIP != "" {
+			return bestIP
+		}
+	}
+
+	// 3. Absolute last resort: loopback address only if no non-loopback interface exists
 	return "127.0.0.1"
 }
 
@@ -59,26 +164,28 @@ func ChangeLogHandler(appState *state.AppState) gin.HandlerFunc {
 			return
 		}
 
+		notify := c.Request.Context().Done()
+
 		for {
 			select {
+			case <-notify:
+				return
 			case change, ok := <-ch:
 				if !ok {
 					return
 				}
-				payload, _ := json.Marshal(change)
-				fmt.Fprintf(c.Writer, "data: %s\n\n", string(payload))
-				flusher.Flush()
-			case <-c.Request.Context().Done():
-				return
-			case <-time.After(30 * time.Second):
-				fmt.Fprintf(c.Writer, ": keep-alive\n\n")
+				data, err := json.Marshal(change)
+				if err != nil {
+					continue
+				}
+				fmt.Fprintf(c.Writer, "data: %s\n\n", data)
 				flusher.Flush()
 			}
 		}
 	}
 }
 
-// SystemConnectionResponse describes the externally reachable server connection endpoints.
+// SystemConnectionResponse provides connection details for clients.
 type SystemConnectionResponse struct {
 	ServerURL       string `json:"serverUrl"`
 	Host            string `json:"host"`
@@ -86,7 +193,7 @@ type SystemConnectionResponse struct {
 	DisplayEndpoint string `json:"displayEndpoint"`
 }
 
-// ResolveExternalHost returns the most suitable public/LAN IP or hostname for external clients.
+// ResolveExternalHost determines the host address to display to clients.
 func ResolveExternalHost(c *gin.Context) string {
 	if c != nil && c.Request != nil && c.Request.Host != "" {
 		host := c.Request.Host
@@ -96,7 +203,7 @@ func ResolveExternalHost(c *gin.Context) string {
 			}
 		}
 		// If client reached us via a non-loopback host (e.g. 192.168.x.x or church.local), use it
-		if host != "" && host != "localhost" && host != "127.0.0.1" && host != "::1" {
+		if host != "" && host != "localhost" && host != "127.0.0.1" && host != "::1" && !strings.HasPrefix(host, "127.") {
 			return host
 		}
 	}

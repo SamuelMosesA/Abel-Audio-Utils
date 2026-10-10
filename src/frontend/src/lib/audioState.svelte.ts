@@ -12,6 +12,14 @@ export interface TranslationSession {
     subtitles: boolean;
 }
 
+export interface LanguageStatus {
+    code: string;
+    name: string;
+    blocked: boolean;
+    active: boolean;
+    listeners: number;
+}
+
 export interface MeterState {
     L: number;
     R: number;
@@ -103,6 +111,7 @@ export class AudioStore {
 export class AIStore {
     aiMasterEnabled = $state(false);
     translations = $state<TranslationSession[]>([]);
+    languages = $state<LanguageStatus[]>([]);
     aiConfig = $state<{ languages: { code: string, name: string }[], originalLanguage: string }>({
         languages: [],
         originalLanguage: "en"
@@ -117,6 +126,9 @@ export class AIStore {
                 const aiData = await res.json();
                 this.aiMasterEnabled = aiData.masterEnabled;
                 this.translations = aiData.sessions || [];
+                if (Array.isArray(aiData.languages)) {
+                    this.languages = aiData.languages;
+                }
             }
         } catch (e) {
             console.error("Error syncing AI status", e);
@@ -162,6 +174,27 @@ export class AIStore {
             this.ui.showNotification(data.error || "Failed to toggle AI", "error");
         }
         await this.sync();
+    }
+
+    async toggleLanguageKillswitch(language: string, blocked: boolean) {
+        const res = await fetchWithSync("/api/ai/streams", {
+            method: "POST",
+            body: JSON.stringify({ 
+                action: "toggle_language", 
+                language, 
+                blocked 
+            })
+        });
+        
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            this.ui.showNotification(data.error || "Failed to toggle language killswitch", "error");
+        }
+        await this.sync();
+    }
+
+    async refreshAIStreams() {
+        await Promise.all([this.sync(), this.fetchConfig()]);
     }
 
     resolveLanguageName(code: string): string {

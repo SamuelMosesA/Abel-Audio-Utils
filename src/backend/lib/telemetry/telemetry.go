@@ -11,6 +11,7 @@ import (
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/log/global"
@@ -18,7 +19,6 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // MultiHandler forwards slog Records to multiple handlers.
@@ -66,6 +66,58 @@ func (m *MultiHandler) WithGroup(name string) slog.Handler {
 		newHandlers[i] = h.WithGroup(name)
 	}
 	return &MultiHandler{handlers: newHandlers}
+}
+
+// SessionLogFilterHandler intercepts benign session decoding failures (such as securecookie
+// mismatches after server restarts or key rotation) and downgrades them from ERROR to WARN.
+type SessionLogFilterHandler struct {
+	next slog.Handler
+}
+
+// NewSessionLogFilterHandler returns a new SessionLogFilterHandler wrapping next.
+func NewSessionLogFilterHandler(next slog.Handler) *SessionLogFilterHandler {
+	return &SessionLogFilterHandler{next: next}
+}
+
+func (h *SessionLogFilterHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.next.Enabled(ctx, level)
+}
+
+func (h *SessionLogFilterHandler) Handle(ctx context.Context, r slog.Record) error {
+	if r.Level >= slog.LevelError && strings.Contains(r.Message, "[sessions]") {
+		var isCookieError bool
+		r.Attrs(func(a slog.Attr) bool {
+			valStr := a.Value.String()
+			if strings.Contains(valStr, "securecookie") || strings.Contains(valStr, "cookie") {
+				isCookieError = true
+				return false
+			}
+			if a.Value.Kind() == slog.KindAny {
+				if err, ok := a.Value.Any().(error); ok && err != nil {
+					if strings.Contains(err.Error(), "securecookie") || strings.Contains(err.Error(), "cookie") {
+						isCookieError = true
+						return false
+					}
+				}
+			}
+			return true
+		})
+		if isCookieError || r.Message == "[sessions] ERROR!" {
+			cloned := r.Clone()
+			cloned.Level = slog.LevelWarn
+			cloned.Message = "[sessions] Invalid or expired session cookie (downgraded to warning)"
+			return h.next.Handle(ctx, cloned)
+		}
+	}
+	return h.next.Handle(ctx, r)
+}
+
+func (h *SessionLogFilterHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &SessionLogFilterHandler{next: h.next.WithAttrs(attrs)}
+}
+
+func (h *SessionLogFilterHandler) WithGroup(name string) slog.Handler {
+	return &SessionLogFilterHandler{next: h.next.WithGroup(name)}
 }
 
 // Telemetry holds reference to resources to be cleaned up.
@@ -176,6 +228,9 @@ func InitTelemetry(ctx context.Context, otlpEndpoint string) (*Telemetry, error)
 	} else {
 		activeHandler = stdoutHandler
 	}
+
+	// Intercept and downgrade third-party session errors
+	activeHandler = NewSessionLogFilterHandler(activeHandler)
 
 	logger := slog.New(activeHandler)
 	slog.SetDefault(logger)

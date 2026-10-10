@@ -110,7 +110,6 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 		// Auth
 		api.POST("/auth/session", LoginHandler(cfg, appState))
 		api.DELETE("/auth/session", LogoutHandler(appState))
-		api.POST("/auth/logout", LogoutHandler(appState))
 
 		// Audio
 		audio := api.Group("/audio")

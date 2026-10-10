@@ -69,7 +69,6 @@ func LoginHandler(cfg *config.Config, appState *state.AppState) gin.HandlerFunc 
 // @Produce json
 // @Success 200 {object} object "Logout Success"
 // @Router /api/auth/session [delete]
-// @Router /api/auth/logout [post]
 func LogoutHandler(appState *state.AppState) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session := sessions.Default(c)

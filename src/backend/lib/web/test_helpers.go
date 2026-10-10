@@ -37,7 +37,6 @@ func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, 
 	{
 		api.POST("/auth/session", LoginHandler(cfg, stateObj))
 		api.DELETE("/auth/session", LogoutHandler(stateObj))
-		api.POST("/auth/logout", LogoutHandler(stateObj))
 		RegisterAdminRoutes(api, stateObj, cfg, processor)
 		api.GET("/recordings", GetRecordingStatus(stateObj))
 		api.GET("/ai/streams", GetAIStreamsStatus(stateObj, cfg))

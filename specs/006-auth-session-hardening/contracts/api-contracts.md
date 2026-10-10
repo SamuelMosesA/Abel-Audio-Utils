@@ -57,12 +57,6 @@ Terminates an authenticated session and revokes the session ID server-side.
 
 ---
 
-### POST `/api/auth/logout` (Alternative Logout Alias)
-
-Same behavior and response as `DELETE /api/auth/session`.
-
----
-
 ## 2. Protected Admin Middleware Contract
 
 ### `SessionAuthMiddleware(appState *state.AppState)`

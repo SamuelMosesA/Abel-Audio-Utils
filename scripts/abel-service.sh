@@ -12,17 +12,22 @@ detect_docker_socket() {
     if [ -n "$DOCKER_HOST" ]; then
         return 0
     fi
-    if [ -S "$HOME/.colima/default/docker.sock" ]; then
-        export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
-    elif [ -S "/var/run/docker.sock" ]; then
+    # 1. Check system default socket first (used by Docker Desktop privileged helper & native Linux)
+    if [ -S "/var/run/docker.sock" ]; then
         export DOCKER_HOST="unix:///var/run/docker.sock"
     elif [ -S "$HOME/.docker/run/docker.sock" ]; then
         export DOCKER_HOST="unix://$HOME/.docker/run/docker.sock"
+    elif [ -S "$HOME/.colima/default/docker.sock" ]; then
+        export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
     else
         # If running as root under launchd/daemon, look for active user's socket in /Users/*/
-        for user_sock in /Users/*/.colima/default/docker.sock /Users/*/.docker/run/docker.sock; do
+        for user_sock in /Users/*/.docker/run/docker.sock /Users/*/.colima/default/docker.sock; do
             if [ -S "$user_sock" ]; then
                 export DOCKER_HOST="unix://$user_sock"
+                # If /var/run/docker.sock does not exist, symlink it so root tools find it immediately
+                if [ ! -e "/var/run/docker.sock" ] && [ "$(id -u)" -eq 0 ]; then
+                    ln -sf "$user_sock" /var/run/docker.sock 2>/dev/null || true
+                fi
                 break
             fi
         done
@@ -116,9 +121,9 @@ start_docker_daemon() {
         fi
     fi
 
-    # Wait up to 30 seconds for Docker daemon
+    # Wait up to 45 seconds for Docker daemon to become responsive
     local elapsed=0
-    while [ $elapsed -lt 30 ]; do
+    while [ $elapsed -lt 45 ]; do
         detect_docker_socket
         if is_docker_responsive; then
             echo "[abel-service] Docker daemon started successfully."

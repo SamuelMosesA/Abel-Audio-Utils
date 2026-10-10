@@ -3,7 +3,7 @@ require "digest"
 class Abel < Formula
   desc "Abel - Audio Recorder with AI Transcription and Translation"
   homepage "https://github.com/SamuelMosesA/Abel-Audio-Utils"
-  url "https://github.com/SamuelMosesA/Abel-Audio-Utils.git", tag: "v0.2.0"
+  url "https://github.com/SamuelMosesA/Abel-Audio-Utils.git", tag: "v0.2.1"
   head "https://github.com/SamuelMosesA/Abel-Audio-Utils.git", branch: "main"
 
   depends_on "go" => :build

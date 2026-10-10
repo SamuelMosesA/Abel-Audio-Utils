@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AudioStore, AIStore, SystemStore, UIStore } from './audioState.svelte';
+import { AudioStore, AIStore, SystemStore, UIStore, FileStore } from './audioState.svelte';
 import { resolveRedirect } from './utils/redirect';
 
 describe('Modular Stores', () => {
@@ -88,6 +88,22 @@ describe('Modular Stores', () => {
             }));
             expect(system.isAuthenticated).toBe(false);
             expect(system.sessionId).toBe("");
+        });
+
+        it('should trigger files.fetchFiles and audio.sync on recording section update', async () => {
+            const ui = new UIStore();
+            const audio = new AudioStore();
+            const ai = new AIStore(ui);
+            const files = new FileStore();
+            const system = new SystemStore(ui, audio, ai, files);
+
+            const audioSyncSpy = vi.spyOn(audio, 'sync').mockResolvedValue(undefined as any);
+            const filesFetchSpy = vi.spyOn(files, 'fetchFiles').mockResolvedValue(undefined as any);
+
+            system.handleRemoteUpdate({ section: 'recording', sessionId: 'other-session' });
+
+            expect(audioSyncSpy).toHaveBeenCalled();
+            expect(filesFetchSpy).toHaveBeenCalled();
         });
     });
 

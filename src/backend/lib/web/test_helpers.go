@@ -15,6 +15,11 @@ func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
 }
 
 func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, processor *RecordingProcessor) *gin.Engine {
+	if processor != nil && stateObj != nil {
+		processor.SetOnUpdate(func() {
+			stateObj.Broadcast(state.SectionRecording)
+		})
+	}
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
 	sessionSecret, _ := config.ResolveSessionSecret(cfg)

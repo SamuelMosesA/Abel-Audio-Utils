@@ -214,7 +214,7 @@ export class SystemStore {
     #sse: EventSource | null = null;
     onMessage: ((dv: DataView) => void) | null = null;
 
-    constructor(private ui: UIStore, private audio: AudioStore, private ai: AIStore) {
+    constructor(private ui: UIStore, private audio: AudioStore, private ai: AIStore, private files?: FileStore) {
         if (typeof window !== 'undefined' && window.localStorage) {
             this.sessionId = localStorage.getItem("session_id") || "";
             this.isAuthenticated = !!this.sessionId;
@@ -259,10 +259,17 @@ export class SystemStore {
         };
     }
 
-    private handleRemoteUpdate(change: { section: string, sessionId: string }) {
-        if (change.section === "ai") this.ai.sync();
-        else if (change.section === "interface" || change.section === "recording") this.audio.sync();
-        else this.audio.sync();
+    handleRemoteUpdate(change: { section: string, sessionId: string }) {
+        if (change.section === "ai") {
+            this.ai.sync();
+        } else if (change.section === "recording") {
+            this.audio.sync();
+            this.files?.fetchFiles();
+        } else if (change.section === "interface") {
+            this.audio.sync();
+        } else {
+            this.audio.sync();
+        }
         
         this.ui.showNotification(`Session ${change.sessionId.slice(0, 4)} updated ${change.section}`, change.section);
     }
@@ -501,7 +508,7 @@ export class AppState {
     visuals: AudioVisuals;
 
     constructor() {
-        this.system = new SystemStore(this.ui, this.audio, this.ai);
+        this.system = new SystemStore(this.ui, this.audio, this.ai, this.files);
         this.visuals = new AudioVisuals(this.system);
         
         if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {

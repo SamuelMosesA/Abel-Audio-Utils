@@ -70,6 +70,7 @@ type RecordingProcessor struct {
 	cancels          map[string]context.CancelFunc
 	queue            chan string
 	info             map[string]cachedDuration
+	onUpdate         func()
 }
 
 type cachedDuration struct {
@@ -87,6 +88,22 @@ func NewRecordingProcessor(cfg *config.Config) *RecordingProcessor {
 	go p.work()
 	go p.reconcileCloudLoop()
 	return p
+}
+
+// SetOnUpdate registers a callback to be invoked when processing state changes.
+func (p *RecordingProcessor) SetOnUpdate(fn func()) {
+	p.mu.Lock()
+	p.onUpdate = fn
+	p.mu.Unlock()
+}
+
+func (p *RecordingProcessor) notifyUpdate() {
+	p.mu.RLock()
+	fn := p.onUpdate
+	p.mu.RUnlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 func (p *RecordingProcessor) reconcileCloudLoop() {
@@ -258,6 +275,7 @@ func (p *RecordingProcessor) Cancel(id string) error {
 	if cancel != nil {
 		cancel()
 	}
+	p.notifyUpdate()
 	slog.Info("recording processing cancelled", "file", job.Source, "job", id)
 	return nil
 }
@@ -285,9 +303,11 @@ func (p *RecordingProcessor) work() {
 		if err != nil {
 			p.update(id, "failed", 0, err)
 			slog.Error("recording processing failed", "file", job.Source, "job", id, "error", err)
+			p.notifyUpdate()
 		} else {
 			p.update(id, "completed", 100, nil)
 			slog.Info("recording processing complete", "file", job.Source, "output", job.Output, "job", id)
+			p.notifyUpdate()
 		}
 	}
 }
@@ -588,7 +608,11 @@ func (p *RecordingProcessor) processWithContext(ctx context.Context, job Process
 }
 
 func (p *RecordingProcessor) Push(name string) error {
-	return p.pushWithContext(context.Background(), name)
+	err := p.pushWithContext(context.Background(), name)
+	if err == nil {
+		p.notifyUpdate()
+	}
+	return err
 }
 
 func (p *RecordingProcessor) pushWithContext(ctx context.Context, name string) error {

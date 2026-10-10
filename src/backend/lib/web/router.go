@@ -21,6 +21,11 @@ import (
 // NewRouter constructs the Gin HTTP engine with authenticated admin routes and public endpoints.
 func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audioengine.HLSPublisher, staticFiles embed.FS) *gin.Engine {
 	processor := NewRecordingProcessor(cfg)
+	if appState != nil {
+		processor.SetOnUpdate(func() {
+			appState.Broadcast(state.SectionRecording)
+		})
+	}
 	// Switch from default to release mode by default, standard logger in gin is noisy
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()

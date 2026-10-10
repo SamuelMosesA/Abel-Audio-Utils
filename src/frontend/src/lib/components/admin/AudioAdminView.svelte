@@ -67,6 +67,24 @@
         }
     };
 
+    let masterRefreshing = $state(false);
+
+    const handleMasterRefresh = async () => {
+        if (masterRefreshing) return;
+        masterRefreshing = true;
+        try {
+            await Promise.all([
+                audio.fetchDevices(),
+                audio.sync(),
+                files.fetchFiles(),
+                system.syncConnection()
+            ]);
+            ui.showNotification("Console refreshed", "system");
+        } finally {
+            masterRefreshing = false;
+        }
+    };
+
     const handleRecording = async () => {
         try {
             const result = await audio.toggleRecording();
@@ -93,6 +111,9 @@
         </div>
 
         <div class="flex items-center gap-2">
+            <Button variant="outline" size="sm" onclick={handleMasterRefresh} disabled={masterRefreshing} title="Refresh all console state">
+                <RotateCw class="w-4 h-4 mr-1 {masterRefreshing ? 'animate-spin' : ''}" /> {masterRefreshing ? "Refreshing..." : "Refresh"}
+            </Button>
             <Button variant="outline" size="sm" onclick={() => goto("/")}>
                 <ChevronLeft class="w-4 h-4 mr-1" /> Return
             </Button>

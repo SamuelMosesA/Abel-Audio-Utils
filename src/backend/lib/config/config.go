@@ -24,7 +24,8 @@ type Config struct {
 	DefaultChL            int          `yaml:"default_ch_l"`
 	DefaultChR            int          `yaml:"default_ch_r"`
 	DefaultBoost          float64      `yaml:"default_boost"`
-	AdminUserCredentials string       `yaml:"admin_user_credentials"`
+	AdminUserCredentials  string       `yaml:"admin_user_credentials"`
+	SessionSecret         string       `yaml:"session_secret"`
 	OpenAIAPIKey          string       `yaml:"openai_api_key"`
 	OpenAITranslateModel  string       `yaml:"openai_translate_model"`
 	OpenAITranscribeModel string       `yaml:"openai_transcribe_model"`

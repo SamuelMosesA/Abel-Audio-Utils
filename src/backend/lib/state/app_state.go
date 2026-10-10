@@ -2,6 +2,7 @@ package state
 
 import (
 	"sync"
+	"time"
 
 	pa "github.com/gordonklaus/portaudio"
 	"github.com/gorilla/websocket"
@@ -92,6 +93,8 @@ type AppState struct {
 	StreamChannels sync.Map // map[chan []float32]bool
 	BroadcastHub   sync.Map // map[chan StateChange]bool
 
+	RevokedSessions sync.Map // map[string]time.Time
+
 	Devices    []*pa.DeviceInfo
 	Translator Translator
 }
@@ -106,6 +109,22 @@ func NewAppState(storage, cloud string) *AppState {
 		RecordChan:   make(chan []float32, 100),
 		PlaybackChan: make(chan []float32, 100),
 	}
+}
+
+// RevokeSession records sessionID as revoked at the current timestamp.
+func (s *AppState) RevokeSession(sessionID string) {
+	if sessionID != "" {
+		s.RevokedSessions.Store(sessionID, time.Now())
+	}
+}
+
+// IsSessionRevoked checks if a sessionID has been revoked on the server.
+func (s *AppState) IsSessionRevoked(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	_, revoked := s.RevokedSessions.Load(sessionID)
+	return revoked
 }
 
 // Getters

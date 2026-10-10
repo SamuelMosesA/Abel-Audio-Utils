@@ -2,6 +2,7 @@ package state
 
 import (
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -140,4 +141,38 @@ func TestAIConfigBlockedLanguages(t *testing.T) {
 	assert.False(t, appState.IsLanguageBlocked("es"))
 	assert.False(t, appState.AI().IsBlocked("es"))
 	assert.Empty(t, appState.AI().BlockedLanguages())
+}
+
+func TestSessionRevocation(t *testing.T) {
+	appState := NewAppState("", "")
+
+	// Check initially unrevoked
+	assert.False(t, appState.IsSessionRevoked("session-123"))
+	assert.False(t, appState.IsSessionRevoked(""))
+
+	// Revoke empty should safely no-op
+	appState.RevokeSession("")
+	assert.False(t, appState.IsSessionRevoked(""))
+
+	// Revoke a session
+	appState.RevokeSession("session-123")
+	assert.True(t, appState.IsSessionRevoked("session-123"))
+	assert.False(t, appState.IsSessionRevoked("session-456"))
+
+	// Concurrent revokes and checks
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			sessID := "concurrent-session"
+			if id%2 == 0 {
+				appState.RevokeSession(sessID)
+			} else {
+				_ = appState.IsSessionRevoked(sessID)
+			}
+		}(i)
+	}
+	wg.Wait()
+	assert.True(t, appState.IsSessionRevoked("concurrent-session"))
 }

@@ -5,6 +5,11 @@ Wants=docker.service
 
 [Service]
 Type=simple
+User=abel
+Group=abel
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
 ExecStart=/usr/local/bin/abel-service
 Restart=always
 RestartSec=5s

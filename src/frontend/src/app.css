@@ -28,10 +28,9 @@
   --letter-spacing-extra: 0.125rem;
   --letter-spacing-ultra: 0.1875rem;
   --blur-ultra: 7.5rem;
-  --glow-radius: 0.9375rem;
 }
 
-/* Base Styles */
+/* Base Global Styles */
 * {
   border-color: hsl(240 3.7% 20%);
 }
@@ -41,15 +40,11 @@ body {
   color: hsl(0 0% 98%);
 }
 
-/* Custom Utilities - No @apply inside them to avoid crashes */
+/* Centralized Semantic Tokens */
 .glass {
-  background-color: rgba(9, 9, 11, 0.6);
+  background-color: rgba(9, 9, 11, 0.7);
   backdrop-filter: blur(0.75rem);
-  border: 0.0625rem solid rgba(255, 255, 255, 0.1);
-}
-
-.glow-primary {
-  box-shadow: 0 0 var(--glow-radius) rgba(34, 197, 94, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .text-gradient {
@@ -57,16 +52,4 @@ body {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-}
-
-.card-premium {
-  background-color: hsl(240 10% 8%);
-  border: 0.0625rem solid hsl(240 3.7% 20%);
-  border-radius: 0.75rem;
-  overflow: hidden;
-  transition: all 0.3s ease;
-}
-
-.card-premium:hover {
-  border-color: rgba(34, 197, 94, 0.5);
 }

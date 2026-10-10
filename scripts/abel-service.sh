@@ -12,17 +12,22 @@ detect_docker_socket() {
     if [ -n "$DOCKER_HOST" ]; then
         return 0
     fi
-    if [ -S "$HOME/.colima/default/docker.sock" ]; then
-        export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
-    elif [ -S "/var/run/docker.sock" ]; then
+    # 1. Check system default socket first (used by Docker Desktop privileged helper & native Linux)
+    if [ -S "/var/run/docker.sock" ]; then
         export DOCKER_HOST="unix:///var/run/docker.sock"
     elif [ -S "$HOME/.docker/run/docker.sock" ]; then
         export DOCKER_HOST="unix://$HOME/.docker/run/docker.sock"
+    elif [ -S "$HOME/.colima/default/docker.sock" ]; then
+        export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
     else
         # If running as root under launchd/daemon, look for active user's socket in /Users/*/
-        for user_sock in /Users/*/.colima/default/docker.sock /Users/*/.docker/run/docker.sock; do
+        for user_sock in /Users/*/.docker/run/docker.sock /Users/*/.colima/default/docker.sock; do
             if [ -S "$user_sock" ]; then
                 export DOCKER_HOST="unix://$user_sock"
+                # If /var/run/docker.sock does not exist, symlink it so root tools find it immediately
+                if [ ! -e "/var/run/docker.sock" ] && [ "$(id -u)" -eq 0 ]; then
+                    ln -sf "$user_sock" /var/run/docker.sock 2>/dev/null || true
+                fi
                 break
             fi
         done
@@ -79,12 +84,31 @@ start_docker_daemon() {
     echo "[abel-service] Docker daemon is not active. Attempting to start..."
     OS_TYPE="$(uname -s)"
     if [ "$OS_TYPE" = "Darwin" ]; then
+        # Identify currently logged in GUI user (if running as root under launchd)
+        CONSOLE_USER="$(stat -f "%Su" /dev/console 2>/dev/null || echo "")"
+        if [ "$CONSOLE_USER" = "root" ] || [ -z "$CONSOLE_USER" ]; then
+            CONSOLE_USER="$(users 2>/dev/null | awk '{print $1}' || echo "")"
+        fi
+
         if [ -d "/Applications/Docker.app" ]; then
-            open -a Docker --args --unattended 2>/dev/null || true
+            if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ "$(id -u)" -eq 0 ]; then
+                echo "[abel-service] Launching Docker Desktop as user $CONSOLE_USER..."
+                sudo -u "$CONSOLE_USER" open -a Docker --args --unattended 2>/dev/null || open -a Docker --args --unattended 2>/dev/null || true
+            else
+                open -a Docker --args --unattended 2>/dev/null || true
+            fi
         elif [ -d "/Applications/OrbStack.app" ]; then
-            open -a OrbStack 2>/dev/null || true
+            if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ "$(id -u)" -eq 0 ]; then
+                sudo -u "$CONSOLE_USER" open -a OrbStack 2>/dev/null || open -a OrbStack 2>/dev/null || true
+            else
+                open -a OrbStack 2>/dev/null || true
+            fi
         elif command -v colima >/dev/null 2>&1; then
-            colima start 2>/dev/null || true
+            if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ "$(id -u)" -eq 0 ]; then
+                sudo -u "$CONSOLE_USER" colima start 2>/dev/null || colima start 2>/dev/null || true
+            else
+                colima start 2>/dev/null || true
+            fi
             detect_docker_socket
         fi
     elif [ "$OS_TYPE" = "Linux" ]; then
@@ -97,9 +121,9 @@ start_docker_daemon() {
         fi
     fi
 
-    # Wait up to 30 seconds for Docker daemon
+    # Wait up to 45 seconds for Docker daemon to become responsive
     local elapsed=0
-    while [ $elapsed -lt 30 ]; do
+    while [ $elapsed -lt 45 ]; do
         detect_docker_socket
         if is_docker_responsive; then
             echo "[abel-service] Docker daemon started successfully."
@@ -114,7 +138,7 @@ start_docker_daemon() {
 }
 
 cleanup() {
-    trap - SIGTERM SIGINT SIGHUP EXIT
+    trap - SIGTERM SIGINT SIGHUP
     echo "[abel-service] Initiating graceful shutdown..."
 
     if [ -n "$ABEL_PID" ] && kill -0 "$ABEL_PID" 2>/dev/null; then
@@ -133,7 +157,7 @@ cleanup() {
     exit 0
 }
 
-trap cleanup SIGTERM SIGINT SIGHUP EXIT
+trap cleanup SIGTERM SIGINT SIGHUP
 
 # 1. Manage Docker and Docker Compose
 if command -v docker >/dev/null 2>&1; then
@@ -160,4 +184,7 @@ echo "[abel-service] Starting Abel binary: $BINARY"
 "$BINARY" "$@" &
 ABEL_PID=$!
 
-wait "$ABEL_PID"
+EXIT_CODE=0
+wait "$ABEL_PID" || EXIT_CODE=$?
+echo "[abel-service] Abel binary exited with status $EXIT_CODE"
+exit "$EXIT_CODE"

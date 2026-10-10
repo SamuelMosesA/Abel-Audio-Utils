@@ -66,6 +66,31 @@ describe('Modular Stores', () => {
         });
     });
 
+    describe('SystemStore', () => {
+        it('should send DELETE /api/auth/session on logout and reset state', async () => {
+            const ui = new UIStore();
+            const audio = new AudioStore();
+            const ai = new AIStore(ui);
+            const system = new SystemStore(ui, audio, ai);
+            system.isAuthenticated = true;
+            system.sessionId = "session-test-id";
+
+            (fetch as any).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ status: 'logged_out' })
+            });
+
+            await system.logout();
+
+            expect(fetch).toHaveBeenCalledWith('/api/auth/session', expect.objectContaining({
+                method: 'DELETE',
+                credentials: 'include'
+            }));
+            expect(system.isAuthenticated).toBe(false);
+            expect(system.sessionId).toBe("");
+        });
+    });
+
     describe('Navigation and Redirects', () => {
         it('should resolve safe internal redirects', () => {
             expect(resolveRedirect('/admin')).toBe('/admin');

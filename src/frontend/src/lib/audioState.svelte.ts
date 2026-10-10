@@ -324,7 +324,16 @@ export class SystemStore {
         }
     }
 
-    logout() {
+    async logout() {
+        try {
+            await fetch("/api/auth/session", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include"
+            });
+        } catch (e) {
+            console.error("Logout request error:", e);
+        }
         if (typeof window !== 'undefined' && window.localStorage) {
             localStorage.removeItem("admin_user");
             localStorage.removeItem("session_id");

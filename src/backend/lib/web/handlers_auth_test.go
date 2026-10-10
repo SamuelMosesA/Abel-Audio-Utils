@@ -113,3 +113,94 @@ func TestSessionSecretValidation(t *testing.T) {
 	routerLegacy.ServeHTTP(recLegacy, reqLegacy)
 	assert.Equal(t, http.StatusUnauthorized, recLegacy.Code)
 }
+
+func TestLogoutHandlerAndRevocation(t *testing.T) {
+	appState := state.NewAppState("", "")
+	storageDir := t.TempDir()
+	cfg := &config.Config{
+		Credentials:     map[string]string{"admin": "password"},
+		StorageLocation: storageDir,
+	}
+	router := setupTestRouter(appState, cfg)
+
+	t.Run("Logout with DELETE /api/auth/session revokes token and clears cookie", func(t *testing.T) {
+		// 1. Log in
+		loginBody, _ := json.Marshal(map[string]string{"username": "admin", "password": "password"})
+		loginReq, _ := http.NewRequest("POST", "/api/auth/session", bytes.NewBuffer(loginBody))
+		loginRec := httptest.NewRecorder()
+		router.ServeHTTP(loginRec, loginReq)
+		assert.Equal(t, http.StatusOK, loginRec.Code)
+		var loginResp map[string]string
+		json.Unmarshal(loginRec.Body.Bytes(), &loginResp)
+		sessID := loginResp["session"]
+		assert.NotEmpty(t, sessID)
+		cookie := loginRec.Header().Get("Set-Cookie")
+
+		// 2. Access protected route -> 200 OK
+		reqProtected, _ := http.NewRequest("GET", "/api/recordings/files", nil)
+		reqProtected.Header.Set("Cookie", cookie)
+		recProtected := httptest.NewRecorder()
+		router.ServeHTTP(recProtected, reqProtected)
+		assert.Equal(t, http.StatusOK, recProtected.Code)
+
+		// 3. Logout via DELETE /api/auth/session
+		logoutReq, _ := http.NewRequest("DELETE", "/api/auth/session", nil)
+		logoutReq.Header.Set("Cookie", cookie)
+		logoutRec := httptest.NewRecorder()
+		router.ServeHTTP(logoutRec, logoutReq)
+		assert.Equal(t, http.StatusOK, logoutRec.Code)
+		var logoutResp map[string]string
+		json.Unmarshal(logoutRec.Body.Bytes(), &logoutResp)
+		assert.Equal(t, "logged_out", logoutResp["status"])
+
+		// Verify cookie was cleared
+		clearedCookie := logoutRec.Header().Get("Set-Cookie")
+		assert.NotEmpty(t, clearedCookie)
+
+		// 4. Verify server-side revocation on AppState
+		assert.True(t, appState.IsSessionRevoked(sessID))
+
+		// 5. Replaying original session cookie must now be rejected with 401 Unauthorized
+		replayReq, _ := http.NewRequest("GET", "/api/recordings/files", nil)
+		replayReq.Header.Set("Cookie", cookie)
+		replayRec := httptest.NewRecorder()
+		router.ServeHTTP(replayRec, replayReq)
+		assert.Equal(t, http.StatusUnauthorized, replayRec.Code)
+		assert.Contains(t, replayRec.Body.String(), "Session revoked")
+	})
+
+	t.Run("Logout alias POST /api/auth/logout revokes token", func(t *testing.T) {
+		// Log in
+		loginBody, _ := json.Marshal(map[string]string{"username": "admin", "password": "password"})
+		loginReq, _ := http.NewRequest("POST", "/api/auth/session", bytes.NewBuffer(loginBody))
+		loginRec := httptest.NewRecorder()
+		router.ServeHTTP(loginRec, loginReq)
+		var loginResp map[string]string
+		json.Unmarshal(loginRec.Body.Bytes(), &loginResp)
+		sessID := loginResp["session"]
+		cookie := loginRec.Header().Get("Set-Cookie")
+
+		// Logout via POST /api/auth/logout
+		logoutReq, _ := http.NewRequest("POST", "/api/auth/logout", nil)
+		logoutReq.Header.Set("Cookie", cookie)
+		logoutRec := httptest.NewRecorder()
+		router.ServeHTTP(logoutRec, logoutReq)
+		assert.Equal(t, http.StatusOK, logoutRec.Code)
+
+		assert.True(t, appState.IsSessionRevoked(sessID))
+
+		// Replay rejected
+		replayReq, _ := http.NewRequest("GET", "/api/recordings/files", nil)
+		replayReq.Header.Set("Cookie", cookie)
+		replayRec := httptest.NewRecorder()
+		router.ServeHTTP(replayRec, replayReq)
+		assert.Equal(t, http.StatusUnauthorized, replayRec.Code)
+	})
+
+	t.Run("Logout with no active session succeeds safely", func(t *testing.T) {
+		logoutReq, _ := http.NewRequest("DELETE", "/api/auth/session", nil)
+		logoutRec := httptest.NewRecorder()
+		router.ServeHTTP(logoutRec, logoutReq)
+		assert.Equal(t, http.StatusOK, logoutRec.Code)
+	})
+}

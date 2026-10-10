@@ -109,6 +109,8 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 	{
 		// Auth
 		api.POST("/auth/session", LoginHandler(cfg, appState))
+		api.DELETE("/auth/session", LogoutHandler(appState))
+		api.POST("/auth/logout", LogoutHandler(appState))
 
 		// Audio
 		audio := api.Group("/audio")
@@ -156,7 +158,7 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 }
 
 func RegisterAdminRoutes(r *gin.RouterGroup, appState *state.AppState, cfg *config.Config, processor *RecordingProcessor) {
-	r.Use(SessionAuthMiddleware())
+	r.Use(SessionAuthMiddleware(appState))
 	{
 		r.PATCH("/audio/config", UpdateAudioConfig(appState, cfg))
 		r.POST("/audio/restart", RestartAudioEngine(appState, cfg))

@@ -1,10 +1,13 @@
 <!--
 Sync Impact Report
-- Version change: 1.0.0 → 1.1.0
+- Version change: 1.1.0 → 1.2.0
 - List of modified principles:
-  - PRINCIPLE_6: Frequent Atomic Commits with Descriptive Messages (Added)
+  - PRINCIPLE_6: Frequent Atomic Commits with Descriptive Messages (Maintained)
+  - PRINCIPLE_7: Explicit Functional Decomposition & Naming (Added)
+  - PRINCIPLE_8: Strict State Encapsulation & Interface Separation (Added)
+  - PRINCIPLE_9: Auditable & Lock-Free Audio Pipeline (Added)
 - Added sections:
-  - Governance Amendment: Automated Commit & Revert Protocol
+  - Code Quality Governance & Encapsulation Standards
 - Removed sections: None
 - Follow-up TODOs: None
 -->
@@ -48,6 +51,24 @@ Every completed task, refactoring step, or logical change set MUST be committed 
 - Commit messages MUST be descriptive and follow conventional commits (e.g. `refactor(audio): delegate wav headers to conversion package`, `feat(ui): simplify recording list styling`).
 - Atomic commits ensure changes are easily auditable, safe, and can be cleanly reverted if an issue arises.
 
+### VII. Explicit Functional Decomposition & Descriptive Naming
+Functions with large bodies or multi-step logic MUST be decomposed into small, single-responsibility functions.
+- Every function name MUST explicitly and unambiguously convey what the function does (verb-noun functional naming).
+- Avoid monolithic functions containing unseparated setup, processing, error-handling, and serialization.
+- Callers and maintainers must be able to understand execution flow directly from the call sites without reading large blocks of inline code.
+
+### VIII. Strict State Encapsulation & Interface Separation
+Mutable state MUST be cleanly encapsulated and shielded from direct outside mutation.
+- Struct fields representing internal state MUST be unexported (private) unless public access is strictly required.
+- Mutations MUST occur exclusively through explicit, thread-safe accessor and modifier methods.
+- State representations and interface contracts MUST reside in separate, distinctly named files to avoid confusing data holding with behavior contracts.
+
+### IX. Auditable & Lock-Free Audio Pipeline (Verifiable Engine-to-Recording Path)
+The path from audio engine capture to disk recording MUST be the most direct and manually verifiable flow in the system.
+- Audio sample clamping, byte formatting, and header construction MUST be pure, reusable functions in `audio_processing`.
+- Recording write loops MUST remain lock-free in the inner chunk path: do not acquire mutexes on each audio chunk when a dedicated single-threaded worker owns file writing.
+- Any engineer inspecting the codebase must be able to trace audio capture from input channel to disk file within minutes.
+
 ## Architecture & Quality Standards
 
 - **Audio Pipeline Safety**: Audio streams, buffer allocations, and concurrency mechanisms (goroutines, channels) must guarantee zero memory leaks and deterministic shutdown.
@@ -67,4 +88,4 @@ Every completed task, refactoring step, or logical change set MUST be committed 
 - Amendments require explicit documentation, version increment according to semantic versioning (MAJOR for breaking changes/removals, MINOR for additions, PATCH for clarifications), and migration guidance.
 - Compliance is validated across all Spec Kit phases and continuous integration gates.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-10 | **Last Amended**: 2026-10-10
+**Version**: 1.2.0 | **Ratified**: 2026-10-10 | **Last Amended**: 2026-10-10

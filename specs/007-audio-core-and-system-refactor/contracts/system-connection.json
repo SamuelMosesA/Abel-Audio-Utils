@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SystemConnectionResponse",
+  "description": "Response schema for GET /api/system/connection providing externally accessible connection info and Wi-Fi SSID",
+  "type": "object",
+  "properties": {
+    "serverUrl": {
+      "type": "string",
+      "format": "uri",
+      "description": "Full HTTP URL reachable on the local or external network for mobile clients",
+      "examples": ["http://192.168.1.120:8080"]
+    },
+    "host": {
+      "type": "string",
+      "description": "Reachable host IP or domain",
+      "examples": ["192.168.1.120"]
+    },
+    "port": {
+      "type": "string",
+      "description": "Active listening port for the server",
+      "examples": ["8080"]
+    },
+    "displayEndpoint": {
+      "type": "string",
+      "description": "Concise ip:port display string shown underneath the QR code",
+      "examples": ["192.168.1.120:8080"]
+    },
+    "ssid": {
+      "type": "string",
+      "description": "Name of the connected Wi-Fi network or N/A",
+      "examples": ["Auditorium-WiFi", "N/A"]
+    }
+  },
+  "required": ["serverUrl", "displayEndpoint", "ssid"],
+  "additionalProperties": false
+}

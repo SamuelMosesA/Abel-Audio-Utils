@@ -178,6 +178,10 @@ LAUNCHD_PLIST="/Library/LaunchDaemons/com.abel.service.plist"
 log_info "Configuring macOS launchd service at $LAUNCHD_PLIST..."
 
 sudo mkdir -p /var/log/abel
+sudo chmod 755 /var/log/abel
+
+# Clean up any existing registered service to prevent error 5 (Already loaded / I/O error)
+sudo launchctl bootout system/com.abel.service 2>/dev/null || sudo launchctl unload "$LAUNCHD_PLIST" 2>/dev/null || true
 
 sudo tee "$LAUNCHD_PLIST" > /dev/null << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -212,8 +216,9 @@ sudo chmod 644 "$LAUNCHD_PLIST"
 
 # 9. Load launchd service
 log_info "Starting Abel background service with launchd..."
-sudo launchctl bootout system/com.abel.service 2>/dev/null || sudo launchctl unload "$LAUNCHD_PLIST" 2>/dev/null || true
-sudo launchctl bootstrap system "$LAUNCHD_PLIST" 2>/dev/null || sudo launchctl load -w "$LAUNCHD_PLIST"
+if ! sudo launchctl bootstrap system "$LAUNCHD_PLIST" 2>/dev/null; then
+    sudo launchctl load -w "$LAUNCHD_PLIST"
+fi
 
 log_info "Installation complete!"
 echo ""
@@ -224,7 +229,7 @@ echo " initialize Docker and the docker-compose stack, and start Abel."
 echo ""
 echo " Service Management:"
 echo "   View logs:   tail -f /var/log/abel/abel.log"
-echo "   Stop:        sudo launchctl bootout system/com.abel.service"
-echo "   Start:       sudo launchctl bootstrap system /Library/LaunchDaemons/com.abel.service.plist"
+echo "   Stop:        sudo launchctl bootout system/com.abel.service (or sudo launchctl unload /Library/LaunchDaemons/com.abel.service.plist)"
+echo "   Start:       sudo launchctl bootstrap system /Library/LaunchDaemons/com.abel.service.plist (or sudo launchctl load -w /Library/LaunchDaemons/com.abel.service.plist)"
 echo "   Config:      /etc/abel/config.yaml (or ~/.config/abel/config.yaml)"
 echo "=================================================================="

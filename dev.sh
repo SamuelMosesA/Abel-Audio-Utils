@@ -30,12 +30,12 @@ cp ./abel.rb "$TAP_DIR/Formula/abel.rb"
 SHA_SUM=$(sha256sum "$ABEL_DEV_TARBALL" | awk '{print $1}')
 ruby -i -pe "sub(/url \".*\", tag: \".*\"/, \"url \\\"file://$ABEL_DEV_TARBALL\\\"\\n  sha256 \\\"$SHA_SUM\\\"\\n  version \\\"1.0.0-dev\\\"\")" "$TAP_DIR/Formula/abel.rb"
 
-# Reinstall/install from the local tap
+# Reinstall/install from the local tap (uses bottles for dependencies, compiles Abel from source)
 echo "==> Installing/updating Abel via Homebrew..."
 if brew list local/abel/abel &>/dev/null; then
-    brew reinstall --build-from-source local/abel/abel
+    brew reinstall local/abel/abel
 else
-    brew install --build-from-source local/abel/abel
+    brew install local/abel/abel
 fi
 
 echo "==> Starting Abel server..."

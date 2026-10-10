@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,10 +16,12 @@ import (
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
 	"abel/src/backend/lib/telemetry"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/gorilla/websocket"
+	sync_map "github.com/zolstein/sync-map"
 )
 
 type TranslationManager struct {
@@ -33,15 +36,16 @@ type TranslationManager struct {
 	OriginalLanguage   string
 	Enabled            atomic.Bool
 
-	Sessions      sync.Map // map[string]*RealtimeSession
-	Subscribers   sync.Map // map[string][]chan string
-	LastRestart   sync.Map // map[string]time.Time
+	Sessions      sync_map.Map[string, *RealtimeSession]
+	Subscribers   sync_map.Map[string, []chan string]
+	LastRestart   sync_map.Map[string, time.Time]
 	Mu            sync.Mutex
 	OnStateChange func()
 
 	endpoint string // overrides the OpenAI realtime URL (tests)
 }
 
+// NewTranslationManager creates a live multilingual speech translation session manager.
 func NewTranslationManager(cfg *config.Config, appState *state.AppState, apiKey, model, voice, originalLang string, audioInSize, audioOutSize, subtitleSize int) (*TranslationManager, error) {
 	return &TranslationManager{
 		Config:             cfg,
@@ -65,28 +69,47 @@ func (m *TranslationManager) SetOnStateChange(fn func()) {
 }
 
 func (m *TranslationManager) CloseAll() {
-	m.Sessions.Range(func(key, value interface{}) bool {
-		s := value.(*RealtimeSession)
-		s.cancel()
+	m.Sessions.Range(func(key string, session *RealtimeSession) bool {
+		session.cancel()
 		return true
 	})
 }
 
 func (m *TranslationManager) ListSessions() []state.SessionInfo {
 	var list []state.SessionInfo
-	m.Sessions.Range(func(key, value interface{}) bool {
-		lang := key.(string)
+	m.Sessions.Range(func(lang string, _ *RealtimeSession) bool {
 		list = append(list, state.SessionInfo{
-			Language: lang,
+			Language:  lang,
+			Listeners: m.GetListenerCount(lang),
+			Subtitles: true,
 		})
 		return true
 	})
 	return list
 }
 
+func (m *TranslationManager) GetListenerCount(language string) int {
+	code := m.Config.ResolveLanguageCode(language)
+	name := m.Config.ResolveLanguageName(language)
+
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+
+	count := 0
+	if subs, ok := m.Subscribers.Load(code); ok {
+		count += len(subs)
+	}
+	if strings.ToLower(code) != strings.ToLower(name) {
+		if subs, ok := m.Subscribers.Load(name); ok {
+			count += len(subs)
+		}
+	}
+	return count
+}
+
 func (m *TranslationManager) StopSession(language string, subtitles bool) {
-	if val, ok := m.Sessions.Load(language); ok {
-		val.(*RealtimeSession).cancel()
+	if session, ok := m.Sessions.Load(language); ok {
+		session.cancel()
 	}
 }
 
@@ -101,10 +124,7 @@ func (m *TranslationManager) isOriginalLanguage(lang string) bool {
 func (m *TranslationManager) GetSubtitles(language string) (chan string, func()) {
 	subCh := make(chan string, m.SubtitleBufferSize)
 	m.Mu.Lock()
-	var subs []chan string
-	if val, ok := m.Subscribers.Load(language); ok {
-		subs = val.([]chan string)
-	}
+	subs, _ := m.Subscribers.Load(language)
 	subs = append(subs, subCh)
 	m.Subscribers.Store(language, subs)
 	m.Mu.Unlock()
@@ -112,8 +132,7 @@ func (m *TranslationManager) GetSubtitles(language string) (chan string, func())
 	cleanup := func() {
 		m.Mu.Lock()
 		defer m.Mu.Unlock()
-		if val, ok := m.Subscribers.Load(language); ok {
-			oldSubs := val.([]chan string)
+		if oldSubs, ok := m.Subscribers.Load(language); ok {
 			newSubs := make([]chan string, 0, len(oldSubs))
 			for _, ch := range oldSubs {
 				if ch != subCh {
@@ -138,14 +157,14 @@ func (m *TranslationManager) GetChannel(language string) chan []float32 {
 	if m.isOriginalLanguage(language) || language == "" {
 		return nil
 	}
-	if val, ok := m.Sessions.Load(language); ok {
-		return val.(*RealtimeSession).AudioOut
+	if session, ok := m.Sessions.Load(language); ok {
+		return session.AudioOut
 	}
 
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
-	if val, ok := m.Sessions.Load(language); ok {
-		return val.(*RealtimeSession).AudioOut
+	if session, ok := m.Sessions.Load(language); ok {
+		return session.AudioOut
 	}
 
 	audioOut := make(chan []float32, m.AudioOutBufferSize)
@@ -164,19 +183,22 @@ func (m *TranslationManager) GetChannel(language string) chan []float32 {
 }
 
 func (m *TranslationManager) PushAudio(chunk []float32) {
+	m.OnNewAudioChunk(chunk)
+}
+
+func (m *TranslationManager) OnNewAudioChunk(chunk []float32) {
 	if !m.Enabled.Load() {
 		return
 	}
-	pcm := m.downsample(chunk)
+	pcm := DownsampleChunkForAI(chunk, m.AppState, m.Config)
 	if len(pcm) == 0 {
 		return
 	}
 
 	// Auto-start a session for any language that has subtitle subscribers but
 	// no live session (subtitle-only viewers never call GetChannel). Debounced
-	// so a failing dial cannot spin. Mirrors TranscriptionManager.PushAudio.
-	m.Subscribers.Range(func(key, value interface{}) bool {
-		lang := key.(string)
+	// so a failing dial cannot spin.
+	m.Subscribers.Range(func(lang string, _ []chan string) bool {
 		if m.isOriginalLanguage(lang) {
 			return true
 		}
@@ -184,7 +206,7 @@ func (m *TranslationManager) PushAudio(chunk []float32) {
 			return true
 		}
 		now := time.Now()
-		if last, ok := m.LastRestart.Load(lang); ok && now.Sub(last.(time.Time)) < 5*time.Second {
+		if last, ok := m.LastRestart.Load(lang); ok && now.Sub(last) < 5*time.Second {
 			return true
 		}
 		m.LastRestart.Store(lang, now)
@@ -194,12 +216,10 @@ func (m *TranslationManager) PushAudio(chunk []float32) {
 		return true
 	})
 
-	m.Sessions.Range(func(key, value interface{}) bool {
-		lang := key.(string)
+	m.Sessions.Range(func(lang string, s *RealtimeSession) bool {
 		if m.isOriginalLanguage(lang) {
 			return true
 		}
-		s := value.(*RealtimeSession)
 		select {
 		case s.AudioIn <- pcm:
 		default:
@@ -208,101 +228,13 @@ func (m *TranslationManager) PushAudio(chunk []float32) {
 	})
 }
 
-func (m *TranslationManager) downsample(chunk []float32) []byte {
-	srcRate := int(m.AppState.Config().SampleRate())
-	if srcRate <= 0 {
-		srcRate = m.Config.SampleRate
-	}
-	dstRate := 24000 // OpenAI Realtime expects 24kHz
-
-	// If sample rates are already equal to 24000 (mono conversion only)
-	if srcRate == dstRate {
-		downsampled := make([]int16, len(chunk)/2)
-		for i := 0; i < len(chunk)/2; i++ {
-			avg := (chunk[i*2] + chunk[i*2+1]) / 2.0
-			if avg > 1.0 { avg = 1.0 } else if avg < -1.0 { avg = -1.0 }
-			downsampled[i] = int16(avg * 32767)
-		}
-		bytes := make([]byte, len(downsampled)*2)
-		for i, v := range downsampled {
-			bytes[i*2] = byte(v & 0xff)
-			bytes[i*2+1] = byte(v >> 8)
-		}
-		return bytes
-	}
-
-	// General downsampling using accumulators/ratios
-	ratio := float64(srcRate) / float64(dstRate)
-	srcFrames := len(chunk) / 2
-	dstFrames := int(float64(srcFrames) / ratio)
-	if dstFrames <= 0 {
-		return nil
-	}
-
-	downsampled := make([]int16, dstFrames)
-	for i := 0; i < dstFrames; i++ {
-		startFrame := int(float64(i) * ratio)
-		endFrame := int(float64(i+1) * ratio)
-		if endFrame > srcFrames {
-			endFrame = srcFrames
-		}
-		if endFrame <= startFrame {
-			endFrame = startFrame + 1
-		}
-
-		var sum float32
-		count := 0
-		for f := startFrame; f < endFrame; f++ {
-			sum += chunk[f*2] + chunk[f*2+1]
-			count += 2
-		}
-		avg := sum / float32(count)
-		if avg > 1.0 { avg = 1.0 } else if avg < -1.0 { avg = -1.0 }
-		downsampled[i] = int16(avg * 32767)
-	}
-
-	bytes := make([]byte, len(downsampled)*2)
-	for i, v := range downsampled {
-		bytes[i*2] = byte(v & 0xff)
-		bytes[i*2+1] = byte(v >> 8)
-	}
-	return bytes
-}
-
-// Reconnect policy for a translation session. A session is supervised for
-// its whole lifetime: when OpenAI closes the socket (the 60-minute cap, a
-// network drop) or reports session_expired, the session object and its
-// channels stay alive, audio arriving meanwhile is buffered, and the socket
-// is re-dialled. Only ctx cancellation (StopSession / CloseAll) ends it.
 const (
 	defaultTranslationEndpoint = "wss://api.openai.com/v1/realtime/translations"
 	reconnectMinBackoff        = 1 * time.Second
 	reconnectMaxBackoff        = 30 * time.Second
-	// Audio held while disconnected: ~15 s of 24 kHz PCM16 mono. Oldest dropped first.
-	pendingAudioMaxBytes = 24000 * 2 * 15
 )
 
 var errSessionExpired = errors.New("openai session expired")
-
-// pendingAudio is a bounded FIFO of downsampled audio kept while no socket is open.
-type pendingAudio struct {
-	chunks [][]byte
-	bytes  int
-}
-
-func (p *pendingAudio) push(chunk []byte) {
-	p.chunks = append(p.chunks, chunk)
-	p.bytes += len(chunk)
-	for p.bytes > pendingAudioMaxBytes && len(p.chunks) > 0 {
-		p.bytes -= len(p.chunks[0])
-		p.chunks = p.chunks[1:]
-	}
-}
-
-func (p *pendingAudio) pop() {
-	p.bytes -= len(p.chunks[0])
-	p.chunks = p.chunks[1:]
-}
 
 func (m *TranslationManager) endpointURL() string {
 	base := m.endpoint
@@ -318,7 +250,7 @@ func (m *TranslationManager) runSession(s *RealtimeSession) {
 	defer m.Sessions.Delete(s.Language)
 	defer close(s.AudioOut)
 
-	var pending pendingAudio
+	pending := NewPendingAudioBuffer(0)
 	backoff := reconnectMinBackoff
 	attempt := 0
 
@@ -326,7 +258,7 @@ func (m *TranslationManager) runSession(s *RealtimeSession) {
 		if s.ctx.Err() != nil {
 			return
 		}
-		conn, err := m.dialBuffering(s, &pending)
+		conn, err := m.dialBuffering(s, pending)
 		if err != nil {
 			if s.ctx.Err() != nil {
 				return
@@ -338,7 +270,7 @@ func (m *TranslationManager) runSession(s *RealtimeSession) {
 				slog.Int("attempt", attempt),
 				slog.Duration("retry_in", backoff),
 			)
-			if !m.waitBuffering(s, backoff, &pending) {
+			if !m.waitBuffering(s, backoff, pending) {
 				return
 			}
 			backoff *= 2
@@ -354,7 +286,7 @@ func (m *TranslationManager) runSession(s *RealtimeSession) {
 		backoff = reconnectMinBackoff
 		s.lastTokens = 0 // usage counters restart with a new OpenAI session
 
-		reason := m.serve(s, conn, &pending)
+		reason := m.serve(s, conn, pending)
 		conn.Close()
 		if s.ctx.Err() != nil {
 			return
@@ -370,7 +302,7 @@ type dialResult struct {
 
 // dialBuffering opens the socket while continuing to drain AudioIn into pending,
 // so audio produced during the handshake is replayed rather than dropped.
-func (m *TranslationManager) dialBuffering(s *RealtimeSession, pending *pendingAudio) (*websocket.Conn, error) {
+func (m *TranslationManager) dialBuffering(s *RealtimeSession, pending *PendingAudioBuffer) (*websocket.Conn, error) {
 	header := http.Header{}
 	header.Add("Authorization", "Bearer "+m.APIKey)
 	header.Add("OpenAI-Safety-Identifier", "abel-recorder-v1")
@@ -392,7 +324,7 @@ func (m *TranslationManager) dialBuffering(s *RealtimeSession, pending *pendingA
 		case r := <-resultCh:
 			return r.conn, r.err
 		case pcm := <-s.AudioIn:
-			pending.push(pcm)
+			pending.Push(pcm)
 		case <-s.ctx.Done():
 			go func() {
 				if r := <-resultCh; r.conn != nil {
@@ -404,9 +336,8 @@ func (m *TranslationManager) dialBuffering(s *RealtimeSession, pending *pendingA
 	}
 }
 
-// waitBuffering sleeps for the backoff while draining AudioIn into pending.
-// Returns false if the session was cancelled.
-func (m *TranslationManager) waitBuffering(s *RealtimeSession, d time.Duration, pending *pendingAudio) bool {
+// waitBuffering sleeps for the backoff duration while continuing to drain AudioIn into pending.
+func (m *TranslationManager) waitBuffering(s *RealtimeSession, d time.Duration, pending *PendingAudioBuffer) bool {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	for {
@@ -414,16 +345,15 @@ func (m *TranslationManager) waitBuffering(s *RealtimeSession, d time.Duration, 
 		case <-timer.C:
 			return true
 		case pcm := <-s.AudioIn:
-			pending.push(pcm)
+			pending.Push(pcm)
 		case <-s.ctx.Done():
 			return false
 		}
 	}
 }
 
-// serve runs one socket's lifetime: configure, replay pending audio, then pump
-// AudioIn until the socket fails, OpenAI expires the session, or ctx ends.
-func (m *TranslationManager) serve(s *RealtimeSession, conn *websocket.Conn, pending *pendingAudio) error {
+// serve configures the session, replays pending audio, and pumps AudioIn to WebSocket.
+func (m *TranslationManager) serve(s *RealtimeSession, conn *websocket.Conn, pending *PendingAudioBuffer) error {
 	config := SessionUpdateEvent{
 		Type: "session.update",
 		Session: SessionConfig{
@@ -441,18 +371,18 @@ func (m *TranslationManager) serve(s *RealtimeSession, conn *websocket.Conn, pen
 	readErr := make(chan error, 1)
 	go m.readLoop(s, conn, readErr)
 
-	for len(pending.chunks) > 0 {
-		if err := writeAudio(conn, pending.chunks[0]); err != nil {
-			return err // unsent chunks stay buffered for the next socket
+	for pending.Len() > 0 {
+		chunk := pending.Pop()
+		if err := writeAudio(conn, chunk); err != nil {
+			return err
 		}
-		pending.pop()
 	}
 
 	for {
 		select {
 		case pcm := <-s.AudioIn:
 			if err := writeAudio(conn, pcm); err != nil {
-				pending.push(pcm) // do not lose the chunk that hit the dead socket
+				pending.Push(pcm)
 				return err
 			}
 		case err := <-readErr:
@@ -470,10 +400,7 @@ func writeAudio(conn *websocket.Conn, pcm []byte) error {
 	})
 }
 
-// readLoop consumes server events until the socket errors or OpenAI expires
-// the session. Non-fatal error events are logged and the session continues;
-// a fatal one is followed by the server closing the socket, which surfaces
-// here as a read error and triggers a reconnect.
+// readLoop consumes server events and broadcasts deltas until socket errors or OpenAI session expires.
 func (m *TranslationManager) readLoop(s *RealtimeSession, conn *websocket.Conn, done chan<- error) {
 	logger := slog.With("component", "openai", slog.String("ai.language", s.Language))
 	for {
@@ -510,11 +437,7 @@ func (m *TranslationManager) readLoop(s *RealtimeSession, conn *websocket.Conn, 
 				)
 			}
 			delta, _ := raw["delta"].(string)
-			targetRate := int(m.AppState.Config().SampleRate())
-			if targetRate <= 0 {
-				targetRate = m.Config.SampleRate
-			}
-			floats, err := DecodeAudioDelta(delta, targetRate)
+			floats, err := DecodeAIDelta(delta, m.AppState, m.Config)
 			if err == nil {
 				select {
 				case s.AudioOut <- floats:
@@ -523,7 +446,7 @@ func (m *TranslationManager) readLoop(s *RealtimeSession, conn *websocket.Conn, 
 			}
 		case "session.output_transcript.delta":
 			delta, _ := raw["delta"].(string)
-			m.broadcastSubtitle(s.Language, delta)
+			BroadcastSubtitle(&m.Subscribers, s.Language, delta)
 		case "response.done":
 			if respObj, ok := raw["response"].(map[string]interface{}); ok {
 				if usage, ok := respObj["usage"].(map[string]interface{}); ok {
@@ -551,19 +474,6 @@ func (m *TranslationManager) readLoop(s *RealtimeSession, conn *websocket.Conn, 
 					done <- errSessionExpired
 					return
 				}
-			}
-		}
-	}
-}
-
-func (m *TranslationManager) broadcastSubtitle(language, text string) {
-	if val, ok := m.Subscribers.Load(language); ok {
-		subs := val.([]chan string)
-		payload, _ := json.Marshal(map[string]interface{}{"text": text, "tokens": 0})
-		for _, ch := range subs {
-			select {
-			case ch <- string(payload):
-			default:
 			}
 		}
 	}

@@ -1,29 +1,33 @@
 package config
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
-
 
 type AILanguage struct {
 	Code string `yaml:"code" json:"code"`
 	Name string `yaml:"name" json:"name"`
 }
 
+// Config holds global server, audio interface, and AI streaming runtime configuration.
 type Config struct {
-	Port               string  `yaml:"port"`
-	SampleRate         int     `yaml:"sample_rate"`
-	BufferSize         int     `yaml:"buffer_size"`
-	StorageLocation    string  `yaml:"storage_location"`
-	CloudDriveLocation string  `yaml:"cloud_drive_location"`
-	DefaultChL         int     `yaml:"default_ch_l"`
-	DefaultChR         int     `yaml:"default_ch_r"`
-	DefaultBoost       float64 `yaml:"default_boost"`
-	AdminUserCredentials  string  `yaml:"admin_user_credentials"`
+	Port                  string       `yaml:"port"`
+	SampleRate            int          `yaml:"sample_rate"`
+	BufferSize            int          `yaml:"buffer_size"`
+	StorageLocation       string       `yaml:"storage_location"`
+	CloudDriveLocation    string       `yaml:"cloud_drive_location"`
+	DefaultChL            int          `yaml:"default_ch_l"`
+	DefaultChR            int          `yaml:"default_ch_r"`
+	DefaultBoost          float64      `yaml:"default_boost"`
+	AdminUserCredentials  string       `yaml:"admin_user_credentials"`
+	SessionSecret         string       `yaml:"session_secret"`
 	OpenAIAPIKey          string       `yaml:"openai_api_key"`
 	OpenAITranslateModel  string       `yaml:"openai_translate_model"`
 	OpenAITranscribeModel string       `yaml:"openai_transcribe_model"`
@@ -63,6 +67,107 @@ func (cfg *Config) ResolveLanguageCode(name string) string {
 	return name
 }
 
+// ResolveRelativePath resolves target relative to the directory containing baseFile if target is relative.
+// If target exists relative to baseFile's directory, that path is returned.
+// Otherwise, it checks if target exists relative to working directory, and finally returns candidate or target.
+func ResolveRelativePath(baseFile, target string) string {
+	if target == "" || filepath.IsAbs(target) {
+		return target
+	}
+	baseDir := filepath.Dir(baseFile)
+	candidate := filepath.Join(baseDir, target)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	if _, err := os.Stat(target); err == nil {
+		return target
+	}
+	return candidate
+}
+
+// LoadCredentials extracts and parses credentials from a JSON file, resolving relative filepaths
+// against configPath. It supports list format [{"username": "...", "password": "..."}] and map format.
+// Always ensures username "admin" with password "admin" is present as default if not explicitly defined.
+func LoadCredentials(configPath, credsPath string) map[string]string {
+	creds := make(map[string]string)
+
+	if credsPath != "" {
+		resolved := ResolveRelativePath(configPath, credsPath)
+		if credsData, err := os.ReadFile(resolved); err == nil {
+			var credList []struct {
+				Username string `json:"username"`
+				Password string `json:"password"`
+			}
+			if err := json.Unmarshal(credsData, &credList); err == nil && len(credList) > 0 {
+				for _, c := range credList {
+					if c.Username != "" {
+						creds[c.Username] = c.Password
+					}
+				}
+			} else {
+				// Try map[string]string format as fallback
+				var credMap map[string]string
+				if err := json.Unmarshal(credsData, &credMap); err == nil {
+					for k, v := range credMap {
+						creds[k] = v
+					}
+				}
+			}
+		}
+	}
+
+	// Always ensure default admin:admin exists if not already set
+	if _, exists := creds["admin"]; !exists {
+		creds["admin"] = "admin"
+	}
+
+	return creds
+}
+
+// ResolveSessionSecret determines the cryptographic secret key used for session cookie signing.
+// If cfg.SessionSecret is configured, it is converted to bytes and returned.
+// Otherwise, it attempts to load or create a 32-byte key in session.key adjacent to cfg.Path
+// (or in ~/.config/abel/session.key) with strict 0600 file permissions.
+func ResolveSessionSecret(cfg *Config) ([]byte, error) {
+	if cfg != nil && cfg.SessionSecret != "" {
+		return []byte(cfg.SessionSecret), nil
+	}
+
+	var dir string
+	if cfg != nil && cfg.Path != "" {
+		dir = filepath.Dir(cfg.Path)
+	} else {
+		userConfig, err := os.UserConfigDir()
+		if err == nil {
+			dir = filepath.Join(userConfig, "abel")
+		} else {
+			dir = "."
+		}
+	}
+
+	keyPath := filepath.Join(dir, "session.key")
+	if data, err := os.ReadFile(keyPath); err == nil && len(data) > 0 {
+		return data, nil
+	}
+
+	// Generate 32 cryptographically secure random bytes
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return nil, fmt.Errorf("failed to generate random session secret: %w", err)
+	}
+
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return secret, err
+	}
+
+	if err := os.WriteFile(keyPath, secret, 0600); err != nil {
+		return secret, err
+	}
+
+	return secret, nil
+}
+
+// LoadConfig parses application settings from YAML or environment variables.
 func LoadConfig(path string) (*Config, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -78,35 +183,18 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	cfg.Path = path
 
-	// Load credentials if configured
-	cfg.Credentials = make(map[string]string)
-	if cfg.AdminUserCredentials != "" {
-		credsData, err := os.ReadFile(cfg.AdminUserCredentials)
-		if err == nil {
-			var credList []struct {
-				Username string `json:"username"`
-				Password string `json:"password"`
-			}
-			if err := json.Unmarshal(credsData, &credList); err == nil {
-				for _, c := range credList {
-					cfg.Credentials[c.Username] = c.Password
-				}
-			} else {
-				// Try map[string]string format as fallback
-				json.Unmarshal(credsData, &cfg.Credentials)
-			}
-		}
-	}
+	// Load credentials using dedicated function with relative path resolution
+	cfg.Credentials = LoadCredentials(path, cfg.AdminUserCredentials)
 
 	if cfg.OpenAIAPIKey == "" {
 		cfg.OpenAIAPIKey = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	}
 	cfg.OpenAIAPIKey = strings.TrimSpace(cfg.OpenAIAPIKey)
 	if cfg.OpenAITranslateModel == "" {
-		cfg.OpenAITranslateModel = "gpt-4o-realtime-preview"
+		cfg.OpenAITranslateModel = "gpt-realtime-translate"
 	}
 	if cfg.OpenAITranscribeModel == "" {
-		cfg.OpenAITranscribeModel = "gpt-4o-realtime-preview"
+		cfg.OpenAITranscribeModel = "gpt-realtime-whisper"
 	}
 	if cfg.OpenAIVoice == "" {
 		cfg.OpenAIVoice = "alloy"

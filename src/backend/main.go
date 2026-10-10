@@ -2,6 +2,7 @@ package main
 
 import (
 	"abel/src/backend/lib/audioengine"
+	"abel/src/backend/lib/audioengine/audio_processing"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/openai"
 	"abel/src/backend/lib/state"
@@ -78,7 +79,7 @@ func main() {
 
 	appState := state.NewAppState(cfg.StorageLocation, cfg.CloudDriveLocation)
 
-	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+	state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 		s.SetChL(int32(cfg.DefaultChL))
 		s.SetChR(int32(cfg.DefaultChR))
 		s.SetBoost(cfg.DefaultBoost)
@@ -101,6 +102,11 @@ func main() {
 		})
 		state.Update[state.AIConfig](appState, state.SectionAI, func(s *state.AIConfig) {
 			s.SetEnabled(false)
+			for _, lang := range cfg.AILanguages {
+				if lang.Code != cfg.AIOriginalLanguage {
+					s.SetBlocked(lang.Code, true)
+				}
+			}
 		})
 		logger.Info("Translation manager ready", slog.String("provider", "openai"))
 	}
@@ -113,17 +119,17 @@ func main() {
 	}
 
 	// Start workers
-	hlsPublisher, err := audioengine.NewHLSPublisher()
+	broadcaster, err := audio_processing.NewLiveAudioBroadcaster()
 	if err != nil {
 		logger.Error("Safari-compatible HLS streaming unavailable", slog.Any("error", err))
 		os.Exit(1)
 	}
-	defer hlsPublisher.Close()
+	defer broadcaster.Close()
 
-	audioengine.StartAudioBroadcaster(appState, cfg, appState.PlaybackChan, hlsPublisher)
+	audioengine.StartAudioBroadcaster(appState, cfg, appState.PlaybackChan, broadcaster)
 	audioengine.StartStorageWorker(appState, appState.RecordChan)
 
-	r := web.NewRouter(appState, cfg, hlsPublisher, staticFiles)
+	r := web.NewRouter(appState, cfg, broadcaster, staticFiles)
 
 	logger.Info("Web UI active", slog.String("url", "http://"+web.GetLocalIP()+":"+cfg.Port))
 	if err := r.Run("0.0.0.0:" + cfg.Port); err != nil {

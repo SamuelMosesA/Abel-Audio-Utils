@@ -1,13 +1,15 @@
 package web
 
 import (
-	"abel/src/backend/lib/audioengine"
+	"abel/src/backend/lib/audioengine/audio_processing"
 	"abel/src/backend/lib/config"
+	"abel/src/backend/lib/recording"
 	"abel/src/backend/lib/state"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,8 +32,120 @@ import (
 // @Security CookieAuth
 // @Security BasicAuth
 // @Router /api/recordings [post]
-func CreateRecording(appState *state.AppState, cfg *config.Config, processor *RecordingProcessor) gin.HandlerFunc {
-	logger := slog.With("component", "recording")
+func createRecordingWavFile(folder string, sampleRate int) (*os.File, string, error) {
+	if err := os.MkdirAll(folder, 0755); err != nil {
+		return nil, "", err
+	}
+	filename := fmt.Sprintf("rec_%d.wav", time.Now().Unix())
+	base := filepath.Join(folder, filename)
+	file, err := os.Create(base)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := audio_processing.WritePlaceholderWavHeader(file, 2, sampleRate); err != nil {
+		file.Close()
+		return nil, "", err
+	}
+	return file, filename, nil
+}
+
+func startRecordingSession(appState *state.AppState, sampleRate int, folder string, boost *float64) (string, error) {
+	if folder == "" {
+		folder = appState.Locations().Storage()
+	}
+	file, filename, err := createRecordingWavFile(folder, sampleRate)
+	if err != nil {
+		return "", err
+	}
+	var startErr error
+	state.Update[state.RecordIntent](appState, state.SectionRecording, func(s *state.RecordIntent) {
+		if s.IsRecording() {
+			startErr = fmt.Errorf("already recording")
+			return
+		}
+		appState.Engine().SetFile(file)
+		appState.Engine().ResetSamples()
+		s.SetRecording(true)
+	})
+	if startErr != nil {
+		file.Close()
+		os.Remove(filepath.Join(folder, filename))
+		return "", startErr
+	}
+	if boost != nil {
+		state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(si *state.AudioEngineUIConfig) {
+			si.SetBoost(*boost)
+		})
+	}
+	slog.With("component", "recording").Info("Recording started", slog.String("recording.file", filename))
+	return filename, nil
+}
+
+func stopRecordingSession(appState *state.AppState, sampleRate int) (string, error) {
+	var file *os.File
+	var samplesWrote int64
+	var stopErr error
+
+	state.Update[state.RecordIntent](appState, state.SectionRecording, func(s *state.RecordIntent) {
+		if !s.IsRecording() {
+			stopErr = fmt.Errorf("not currently recording")
+			return
+		}
+		file, samplesWrote = appState.Engine().TakeFile()
+		s.SetRecording(false)
+	})
+
+	if stopErr != nil {
+		return "", stopErr
+	}
+	if file == nil {
+		return "", fmt.Errorf("no file to finalize")
+	}
+
+	filename := filepath.Base(file.Name())
+	if errFinalize := audio_processing.FinalizeWavHeaderWithSamples(file, 2, samplesWrote, sampleRate); errFinalize != nil {
+		file.Close()
+		return "", errFinalize
+	}
+	if errClose := file.Close(); errClose != nil {
+		return "", errClose
+	}
+
+	slog.With("component", "recording").Info("Recording stopped",
+		slog.String("recording.file", filename),
+		slog.Int("recording.samples", int(samplesWrote)),
+	)
+	return filename, nil
+}
+
+func handleStartRecording(c *gin.Context, appState *state.AppState, sampleRate int, folder string, boost *float64) {
+	filename, err := startRecordingSession(appState, sampleRate, folder, boost)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "Recording started", "file": filename})
+}
+
+func handleStopRecording(c *gin.Context, appState *state.AppState, sampleRate int, processor *recording.RecordingProcessor) {
+	filename, err := stopRecordingSession(appState, sampleRate)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	response := gin.H{"status": "Recording stopped", "file": filename}
+	if processor != nil {
+		if job, processErr := processor.Enqueue(filename, 0, 0, true); processErr != nil {
+			slog.With("component", "recording").Error("Could not queue recording processing", "file", filename, "error", processErr)
+			response["processingError"] = processErr.Error()
+		} else {
+			response["jobId"] = job.ID
+		}
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func CreateRecording(appState *state.AppState, cfg *config.Config, processor *recording.RecordingProcessor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			Action string   `json:"action"`
@@ -43,112 +157,19 @@ func CreateRecording(appState *state.AppState, cfg *config.Config, processor *Re
 			return
 		}
 
-		var respStatus string
-		var respFile string
-		var err error
-
 		sampleRate := int(appState.Config().SampleRate())
 		if sampleRate <= 0 {
 			sampleRate = cfg.SampleRate
 		}
 
-		var shouldUpdateBoost bool
-		state.Update[state.RecordIntent](appState, state.SectionRecording, func(s *state.RecordIntent) {
-			isRecording := s.IsRecording()
-
-			if req.Action == "start" {
-				if isRecording {
-					err = fmt.Errorf("already recording")
-					return
-				}
-				folder := req.Folder
-				if folder == "" {
-					folder = appState.Locations().Storage()
-				}
-				os.MkdirAll(folder, 0755)
-				filename := fmt.Sprintf("rec_%d.wav", time.Now().Unix())
-				base := filepath.Join(folder, filename)
-				file, errCreate := os.Create(base)
-				if errCreate != nil {
-					err = errCreate
-					return
-				}
-				if errHeader := audioengine.WritePlaceholderHeader(file, 2, sampleRate); errHeader != nil {
-					file.Close()
-					err = errHeader
-					return
-				}
-
-				appState.Engine().SetFile(file)
-				appState.Engine().ResetSamples()
-				s.SetRecording(true)
-				if req.Boost != nil {
-					shouldUpdateBoost = true
-				}
-				logger.Info("Recording started",
-					slog.String("recording.file", filename),
-				)
-				respStatus = "Recording started"
-				respFile = filename
-
-			} else if req.Action == "stop" {
-				if !isRecording {
-					err = fmt.Errorf("not currently recording")
-					return
-				}
-
-				file, samplesWrote := appState.Engine().TakeFile()
-				s.SetRecording(false)
-
-				if file == nil {
-					err = fmt.Errorf("no file to finalize")
-					return
-				}
-
-				filename := filepath.Base(file.Name())
-				if errFinalize := audioengine.FinalizeWavHeader(file, 2, samplesWrote, sampleRate); errFinalize != nil {
-					file.Close()
-					err = errFinalize
-					return
-				}
-				if errClose := file.Close(); errClose != nil {
-					err = errClose
-					return
-				}
-
-				logger.Info("Recording stopped",
-					slog.String("recording.file", filename),
-					slog.Int("recording.samples", int(samplesWrote)),
-				)
-				respStatus = "Recording stopped"
-				respFile = filename
-			} else {
-				err = fmt.Errorf("invalid action")
-			}
-		})
-
-		if err == nil && shouldUpdateBoost && req.Boost != nil {
-			state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(si *state.InterfaceConfig) {
-				si.SetBoost(*req.Boost)
-			})
+		switch req.Action {
+		case "start":
+			handleStartRecording(c, appState, sampleRate, req.Folder, req.Boost)
+		case "stop":
+			handleStopRecording(c, appState, sampleRate, processor)
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid action"})
 		}
-
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		response := gin.H{"status": respStatus, "file": respFile}
-		if req.Action == "stop" && processor != nil {
-			job, processErr := processor.enqueue(respFile, 0, 0, true)
-			if processErr != nil {
-				logger.Error("Could not queue recording processing", "file", respFile, "error", processErr)
-				response["processingError"] = processErr.Error()
-			} else {
-				response["jobId"] = job.ID
-			}
-		}
-		c.JSON(http.StatusOK, response)
 	}
 }
 
@@ -169,6 +190,7 @@ func GetRecordingStatus(appState *state.AppState) gin.HandlerFunc {
 	}
 }
 
+// ListRecordingFiles enumerates saved audio recordings available for download.
 func ListRecordingFiles(cfg *config.Config) gin.HandlerFunc {
 	// @Summary List recording files
 	// @Description Returns a list of WAV files in storage
@@ -208,7 +230,7 @@ func ListRecordingFiles(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
-func PushRecordingToCloud(processor *RecordingProcessor) gin.HandlerFunc {
+func PushRecordingToCloud(processor *recording.RecordingProcessor) gin.HandlerFunc {
 	// @Summary Push recording to cloud
 	// @Description Copies a local file to the cloud drive location
 	// @Tags Recordings
@@ -230,7 +252,7 @@ func PushRecordingToCloud(processor *RecordingProcessor) gin.HandlerFunc {
 
 		if err := processor.Push(req.Source); err != nil {
 			status := http.StatusInternalServerError
-			if errors.Is(err, errInvalidExport) {
+			if errors.Is(err, recording.ErrInvalidExport) {
 				status = http.StatusBadRequest
 			} else if errors.Is(err, os.ErrNotExist) {
 				status = http.StatusNotFound
@@ -245,7 +267,7 @@ func PushRecordingToCloud(processor *RecordingProcessor) gin.HandlerFunc {
 	}
 }
 
-func ListRecordingLibrary(processor *RecordingProcessor) gin.HandlerFunc {
+func ListRecordingLibrary(processor *recording.RecordingProcessor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		entries, err := processor.Library()
 		if err != nil {
@@ -256,7 +278,7 @@ func ListRecordingLibrary(processor *RecordingProcessor) gin.HandlerFunc {
 	}
 }
 
-func ProcessRecording(processor *RecordingProcessor) gin.HandlerFunc {
+func ProcessRecording(processor *recording.RecordingProcessor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			Source       string  `json:"source"`
@@ -272,10 +294,10 @@ func ProcessRecording(processor *RecordingProcessor) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Manual trim needs a start or end time"})
 			return
 		}
-		job, err := processor.enqueue(req.Source, req.StartSeconds, req.EndSeconds, req.Automatic)
+		job, err := processor.Enqueue(req.Source, req.StartSeconds, req.EndSeconds, req.Automatic)
 		if err != nil {
 			status := http.StatusBadRequest
-			if errors.Is(err, errQueueFull) {
+			if errors.Is(err, recording.ErrQueueFull) {
 				status = http.StatusServiceUnavailable
 			} else if errors.Is(err, os.ErrNotExist) {
 				status = http.StatusNotFound
@@ -296,7 +318,7 @@ func ProcessRecording(processor *RecordingProcessor) gin.HandlerFunc {
 // @Security CookieAuth
 // @Security BasicAuth
 // @Router /api/recordings/process/cancel [post]
-func CancelRecordingProcessing(processor *RecordingProcessor) gin.HandlerFunc {
+func CancelRecordingProcessing(processor *recording.RecordingProcessor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			ID string `json:"id"`
@@ -315,7 +337,55 @@ func CancelRecordingProcessing(processor *RecordingProcessor) gin.HandlerFunc {
 
 const maxRecordingUpload = int64(4 << 30)
 
-func UploadRecording(processor *RecordingProcessor) gin.HandlerFunc {
+func storeUploadedAudio(part *multipart.Part, storageDir string) (string, int64, error) {
+	base := filepath.Base(strings.ReplaceAll(part.FileName(), "\\", "/"))
+	if len(base) > 180 || !recording.ValidAudioName(base) {
+		return "", 0, errors.New("Supported files: WAV, MP3, M4A, FLAC, AAC, OGG (name up to 180 bytes)")
+	}
+	if err := os.MkdirAll(storageDir, 0755); err != nil {
+		return "", 0, fmt.Errorf("create directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(storageDir, ".abel-upload-*")
+	if err != nil {
+		return "", 0, fmt.Errorf("create temp file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	copied, copyErr := io.Copy(tmp, part)
+	if closeErr := tmp.Close(); copyErr == nil {
+		copyErr = closeErr
+	}
+	if copyErr != nil {
+		return "", copied, copyErr
+	}
+	if copied == 0 {
+		return "", 0, errors.New("Audio file is empty")
+	}
+	if err := recording.ValidateAudioFile(tmp.Name()); err != nil {
+		return "", copied, errors.New("File does not contain readable audio")
+	}
+	name := fmt.Sprintf("import-%d-%s", time.Now().UnixNano(), base)
+	if err := os.Chmod(tmp.Name(), 0644); err != nil {
+		return "", copied, err
+	}
+	if err := os.Rename(tmp.Name(), filepath.Join(storageDir, name)); err != nil {
+		return "", copied, fmt.Errorf("publish audio: %w", err)
+	}
+	return name, copied, nil
+}
+
+func respondUploadError(c *gin.Context, err error, bytesWritten int64) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) || bytesWritten > maxRecordingUpload {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Audio file exceeds 4 GB"})
+	} else if strings.Contains(err.Error(), "Supported files") || strings.Contains(err.Error(), "empty") || strings.Contains(err.Error(), "readable") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	} else {
+		slog.Error("Audio upload failed", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not store audio file"})
+	}
+}
+
+func UploadRecording(processor *recording.RecordingProcessor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRecordingUpload+(1<<20))
 		reader, err := c.Request.MultipartReader()
@@ -329,63 +399,16 @@ func UploadRecording(processor *RecordingProcessor) gin.HandlerFunc {
 			return
 		}
 		defer part.Close()
-		base := filepath.Base(strings.ReplaceAll(part.FileName(), "\\", "/"))
-		if len(base) > 180 || !validAudioName(base) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Supported files: WAV, MP3, M4A, FLAC, AAC, OGG (name up to 180 bytes)"})
-			return
-		}
-		if err := os.MkdirAll(processor.cfg.StorageLocation, 0755); err != nil {
-			slog.Error("Could not create recordings directory", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not store audio file"})
-			return
-		}
-		tmp, err := os.CreateTemp(processor.cfg.StorageLocation, ".abel-upload-*")
+
+		name, bytesWritten, err := storeUploadedAudio(part, processor.StorageLocation())
 		if err != nil {
-			slog.Error("Could not create upload file", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not store audio file"})
+			respondUploadError(c, err, bytesWritten)
 			return
 		}
-		defer os.Remove(tmp.Name())
-		copied, copyErr := io.Copy(tmp, part)
-		if closeErr := tmp.Close(); copyErr == nil {
-			copyErr = closeErr
-		}
-		if copyErr != nil {
-			var tooLarge *http.MaxBytesError
-			if errors.As(copyErr, &tooLarge) || copied > maxRecordingUpload {
-				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Audio file exceeds 4 GB"})
-			} else {
-				slog.Error("Audio upload failed", "name", base, "error", copyErr)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not store audio file"})
-			}
-			return
-		}
-		if copied > maxRecordingUpload {
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Audio file exceeds 4 GB"})
-			return
-		}
-		if copied == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Audio file is empty"})
-			return
-		}
-		if err := validateAudioFile(tmp.Name()); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "File does not contain readable audio"})
-			return
-		}
-		name := fmt.Sprintf("import-%d-%s", time.Now().UnixNano(), base)
-		if err := os.Chmod(tmp.Name(), 0644); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not store audio file"})
-			return
-		}
-		if err := os.Rename(tmp.Name(), filepath.Join(processor.cfg.StorageLocation, name)); err != nil {
-			slog.Error("Could not publish uploaded audio", "name", base, "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not store audio file"})
-			return
-		}
-		slog.Info("Audio file imported", "file", name, "bytes", copied)
+
+		slog.Info("Audio file imported", "file", name, "bytes", bytesWritten)
 		response := gin.H{"file": name}
-		job, err := processor.enqueue(name, 0, 0, true)
-		if err != nil {
+		if job, err := processor.Enqueue(name, 0, 0, true); err != nil {
 			slog.Error("Could not queue imported audio", "file", name, "error", err)
 			response["processingError"] = err.Error()
 		} else {

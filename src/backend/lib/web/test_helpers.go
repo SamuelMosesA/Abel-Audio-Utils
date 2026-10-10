@@ -2,6 +2,7 @@ package web
 
 import (
 	"abel/src/backend/lib/config"
+	"abel/src/backend/lib/recording"
 	"abel/src/backend/lib/state"
 	"sync"
 
@@ -11,13 +12,20 @@ import (
 )
 
 func setupTestRouter(stateObj *state.AppState, cfg *config.Config) *gin.Engine {
-	return setupTestRouterWithProcessor(stateObj, cfg, NewRecordingProcessor(cfg))
+	return setupTestRouterWithProcessor(stateObj, cfg, recording.NewRecordingProcessor(cfg))
 }
 
-func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, processor *RecordingProcessor) *gin.Engine {
+func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, processor *recording.RecordingProcessor) *gin.Engine {
+	if processor != nil && stateObj != nil {
+		processor.SetOnUpdate(func() {
+			stateObj.Broadcast(state.SectionRecording)
+		})
+	}
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	store := cookie.NewStore([]byte("secret"))
+	sessionSecret, _ := config.ResolveSessionSecret(cfg)
+	store := cookie.NewStore(sessionSecret)
+	r.Use(CookieSanitizerMiddleware("abel_session", sessionSecret))
 	r.Use(sessions.Sessions("abel_session", store))
 
 	// Mock auth session if header is present
@@ -34,13 +42,15 @@ func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, 
 
 	api := r.Group("/api")
 	{
+		api.GET("/auth/session", SessionAuthMiddleware(stateObj), GetSessionHandler())
 		api.POST("/auth/session", LoginHandler(cfg, stateObj))
+		api.DELETE("/auth/session", LogoutHandler(stateObj))
 		RegisterAdminRoutes(api, stateObj, cfg, processor)
 		api.GET("/recordings", GetRecordingStatus(stateObj))
-		api.GET("/ai/streams", GetAIStreamsStatus(stateObj))
+		api.GET("/ai/streams", GetAIStreamsStatus(stateObj, cfg))
 		api.GET("/system/connection", GetSystemConnection(cfg))
 	}
-	r.GET("/stream", StreamHandler())
+	r.GET("/stream", StreamHandler(stateObj, cfg, nil))
 	r.GET("/subtitles/:lang", SubtitlesHandler(stateObj, cfg))
 	r.GET("/ws", NewWSHandler(stateObj, cfg))
 
@@ -81,7 +91,8 @@ func (m *MockTranslator) SendSubtitle(value string) {
 }
 func (m *MockTranslator) StopSession(lang string, subs bool) {}
 func (m *MockTranslator) CloseAll()                          {}
-func (m *MockTranslator) PushAudio(samples []float32)        {}
+func (m *MockTranslator) OnNewAudioChunk(samples []float32)  {}
 func (m *MockTranslator) SetOnStateChange(fn func())         {}
+func (m *MockTranslator) GetListenerCount(lang string) int   { return 0 }
 
 var testCfg = &config.Config{}

@@ -7,7 +7,7 @@
     let audioElement = $state<HTMLAudioElement | null>(null);
     let errorMessage = $state("");
     let isStarting = $state(false);
-    let hasPlayed = $state(false);
+    let isPlaying = $state(false);
 
     async function startPlayback() {
         if (!audioElement || isStarting) return;
@@ -15,16 +15,12 @@
         isStarting = true;
         try {
             await audioElement.play();
-            hasPlayed = true;
+            isPlaying = true;
         } catch {
-            errorMessage = "Safari blocked playback or the live stream is not ready. Tap Retry to try again.";
+            errorMessage = "Browser blocked playback. Tap Retry to start audio.";
         } finally {
             isStarting = false;
         }
-    }
-
-    function handleMediaError() {
-        errorMessage = "The live audio stream could not be loaded. Tap Retry when the broadcast is active.";
     }
 </script>
 
@@ -32,18 +28,21 @@
     <audio
         bind:this={audioElement}
         controls
+        playsinline
         preload="none"
         {src}
         aria-label={label}
-        onerror={handleMediaError}
         onplaying={() => {
-            hasPlayed = true;
+            isPlaying = true;
             errorMessage = "";
         }}
-        class="w-full h-10 rounded-lg opacity-80 hover:opacity-100 transition-opacity"
+        onerror={() => {
+            errorMessage = "Live audio stream unavailable. Tap Retry to reconnect.";
+        }}
+        class="w-full h-10 rounded-lg opacity-85 hover:opacity-100 transition-opacity"
     ></audio>
 
-    {#if !hasPlayed || errorMessage}
+    {#if !isPlaying || errorMessage}
         <Button variant="secondary" size="sm" onclick={startPlayback} disabled={isStarting} class="w-full sm:w-auto">
             {#if errorMessage}
                 <RotateCcw class="w-4 h-4 mr-2" /> Retry Listening

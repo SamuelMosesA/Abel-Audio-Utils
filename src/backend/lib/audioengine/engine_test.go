@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ type MockStream struct {
 }
 
 func (m *MockStream) Start() error { return nil }
-func (m *MockStream) Stop() error { return nil }
+func (m *MockStream) Stop() error  { return nil }
 func (m *MockStream) Close() error { return nil }
 func (m *MockStream) Read() error {
 	if m.ReadFunc != nil {
@@ -42,17 +43,17 @@ func (m *MockStreamer) OpenStream(params pa.StreamParameters, args ...interface{
 
 func TestEngineAudioProcessing(t *testing.T) {
 	appState := state.NewAppState("", "")
-	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+	state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 		s.SetChL(0)
 		s.SetChR(1)
 		s.SetBoost(1.0)
 	})
 	appState.Devices = []*pa.DeviceInfo{{Name: "Test", MaxInputChannels: 2}}
 	cfg := &config.Config{BufferSize: 2, SampleRate: 44100}
-	
+
 	recordChan := make(chan []float32, 1)
 	playbackChan := make(chan []float32, 1)
-	
+
 	mockStreamer := &MockStreamer{
 		OpenStreamFunc: func(params pa.StreamParameters, args ...interface{}) (PortAudioStream, error) {
 			in := args[0].([]float32)
@@ -81,12 +82,12 @@ func TestEngineAudioProcessing(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timeout waiting for audio chunk")
 	}
-	
-	// Close engine
-	close(appState.QuitAudio)
-	time.Sleep(100 * time.Millisecond)
-}
 
+	// Close engine cleanly
+	err = StopAudioEngine(appState)
+	assert.NoError(t, err)
+	assert.False(t, appState.Engine().IsRunning())
+}
 
 func TestStartAudioEngineRejectsInvalidDevice(t *testing.T) {
 	appState := state.NewAppState("", "")
@@ -130,11 +131,10 @@ func TestRestartEngineReconnectsByNameAndReloadsConfig(t *testing.T) {
 	}
 	cfg := &config.Config{BufferSize: 2, SampleRate: 44100, DefaultChL: 1, DefaultBoost: 1.0,
 		Credentials: map[string]string{"admin": "old"}, Path: writeConfig(t, "1.5", "new")}
-	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+	state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 		s.SetIsRunning(true)
 		s.SetDeviceID(1)
 		s.SetChL(1)
-		s.SetBoost(1.0)
 	})
 
 	var streamClosed atomic.Bool
@@ -158,9 +158,7 @@ func TestRestartEngineReconnectsByNameAndReloadsConfig(t *testing.T) {
 	result, err := RestartEngine(streamer, appState, cfg)
 	require.NoError(t, err)
 	defer func() {
-		if appState.QuitAudio != nil {
-			close(appState.QuitAudio)
-		}
+		_ = StopAudioEngine(appState)
 	}()
 
 	assert.Equal(t, []AudioDevice{
@@ -182,7 +180,7 @@ func TestRestartEngineStaysStoppedWhenDeviceMissing(t *testing.T) {
 	appState.Devices = []*pa.DeviceInfo{{Name: "Behringer UMC404HD", MaxInputChannels: 4}}
 	cfg := &config.Config{BufferSize: 2, SampleRate: 44100,
 		Credentials: map[string]string{"admin": "pw"}, Path: filepath.Join(t.TempDir(), "missing.yaml")}
-	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+	state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 		s.SetIsRunning(true)
 		s.SetDeviceID(0)
 		s.SetChL(3)
@@ -208,6 +206,95 @@ func TestRestartEngineFailsWhenAudioReinitFails(t *testing.T) {
 
 	_, err := RestartEngine(&MockStreamer{}, appState, &config.Config{})
 	assert.ErrorContains(t, err, "host error")
+	assert.False(t, appState.Config().IsRunning(), "engine state must be stopped on reinit error")
+	assert.Equal(t, int32(-1), appState.Config().DeviceID())
+}
+
+func TestConcurrentRestartAndStopEngine(t *testing.T) {
+	appState := state.NewAppState("", "")
+	appState.Devices = []*pa.DeviceInfo{
+		{Name: "Test Device", MaxInputChannels: 2},
+	}
+	cfg := &config.Config{BufferSize: 2, SampleRate: 44100}
+
+	stubPortAudio(t, func() error {
+		time.Sleep(5 * time.Millisecond)
+		return nil
+	}, []*pa.DeviceInfo{{Name: "Test Device", MaxInputChannels: 2}})
+
+	streamer := &MockStreamer{
+		OpenStreamFunc: func(params pa.StreamParameters, args ...interface{}) (PortAudioStream, error) {
+			return &MockStream{}, nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = RestartEngine(streamer, appState, cfg)
+		}()
+	}
+	wg.Wait()
+
+	_ = StopAudioEngine(appState)
+	assert.False(t, appState.Engine().IsRunning())
+}
+
+func TestStopAudioEngineWithReadErrors(t *testing.T) {
+	appState := state.NewAppState("", "")
+	appState.Devices = []*pa.DeviceInfo{{Name: "Faulty Device", MaxInputChannels: 2}}
+	cfg := &config.Config{BufferSize: 2, SampleRate: 44100}
+
+	streamer := &MockStreamer{
+		OpenStreamFunc: func(params pa.StreamParameters, args ...interface{}) (PortAudioStream, error) {
+			return &MockStream{
+				ReadFunc: func() error {
+					time.Sleep(5 * time.Millisecond)
+					return errors.New("input underflow / read error")
+				},
+			}, nil
+		},
+	}
+
+	err := StartAudioEngine(streamer, appState, cfg, 0, nil, nil)
+	require.NoError(t, err)
+	assert.True(t, appState.Engine().IsRunning())
+
+	time.Sleep(20 * time.Millisecond)
+
+	err = StopAudioEngine(appState)
+	assert.NoError(t, err)
+	assert.False(t, appState.Engine().IsRunning())
+}
+
+func TestStartAudioEngineAdoptsDeviceNativeDefaultRate(t *testing.T) {
+	appState := state.NewAppState("", "")
+	// Device only supports 32000 Hz native default sample rate
+	appState.Devices = []*pa.DeviceInfo{
+		{Name: "Voice Mic 32k", MaxInputChannels: 1, DefaultSampleRate: 32000},
+	}
+	// Config requests 48000 Hz
+	cfg := &config.Config{BufferSize: 256, SampleRate: 48000}
+
+	var openedRate float64
+	streamer := &MockStreamer{
+		OpenStreamFunc: func(params pa.StreamParameters, args ...interface{}) (PortAudioStream, error) {
+			openedRate = params.SampleRate
+			return &MockStream{}, nil
+		},
+	}
+
+	err := StartAudioEngine(streamer, appState, cfg, 0, nil, nil)
+	require.NoError(t, err)
+	defer func() { _ = StopAudioEngine(appState) }()
+
+	// Must directly adopt native 32000 Hz without failing on 48000 Hz
+	assert.Eventually(t, func() bool {
+		return appState.Config().SampleRate() == 32000
+	}, 1*time.Second, 10*time.Millisecond)
+	assert.Equal(t, float64(32000), openedRate)
 }
 
 type closeTrackingStream struct {

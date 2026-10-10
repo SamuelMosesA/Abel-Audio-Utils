@@ -15,7 +15,7 @@ describe('LiveAudioPlayer', () => {
 
     it('starts playback from an explicit user action', async () => {
         play.mockResolvedValueOnce();
-        render(LiveAudioPlayer, { src: '/api/audio/hls/default/index.m3u8' });
+        render(LiveAudioPlayer, { src: '/api/audio/stream' });
 
         await fireEvent.click(screen.getByRole('button', { name: 'Start Listening' }));
 
@@ -24,11 +24,11 @@ describe('LiveAudioPlayer', () => {
 
     it('surfaces a rejected playback request and allows retry', async () => {
         play.mockRejectedValueOnce(new DOMException('Not allowed', 'NotAllowedError'));
-        render(LiveAudioPlayer, { src: '/api/audio/hls/default/index.m3u8' });
+        render(LiveAudioPlayer, { src: '/api/audio/stream' });
 
         await fireEvent.click(screen.getByRole('button', { name: 'Start Listening' }));
 
-        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Safari blocked playback'));
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Browser blocked playback'));
         expect(screen.getByRole('button', { name: 'Retry Listening' })).toBeInTheDocument();
     });
 });

@@ -1,24 +1,22 @@
 package audioengine
 
 import (
+	"abel/src/backend/lib/audioengine/audio_processing"
 	"abel/src/backend/lib/state"
 	"abel/src/backend/lib/telemetry"
 	"context"
-	"encoding/binary"
 	"io"
 	"log/slog"
 	"os"
 	"time"
 )
 
-// StartStorageWorker starts a goroutine that processes audio chunks and writes them to disk.
+// StartStorageWorker starts a dedicated goroutine that consumes audio chunks and writes them to disk.
 //
-// Data Flow:
-// 1. Receives float32 audio chunks from recordChan (stereo interleaved: [L, R, L, R, ...])
-// 2. Converts each float32 sample to int16 (clamped [-1.0, 1.0])
-// 3. Batches converted int16 pairs into a byte buffer (Little Endian)
-// 4. Writes batched bytes via appState.Engine().WriteWithFile to protect against concurrent file closures
-// 5. Tracks total samples written safely under mutex
+// Lock-Free Data Flow:
+// 1. Receives float32 interleaved stereo chunks from recordChan ([L0, R0, L1, R1, ...]).
+// 2. Converts and clamps samples to 16-bit Little-Endian PCM via audio_processing.ConvertStereoFloat32ToPCM16LE.
+// 3. Writes converted bytes directly to disk via appState.Engine().WriteWithFile without mutex lock contention.
 func StartStorageWorker(appState *state.AppState, recordChan <-chan []float32) {
 	logger := slog.With("component", "storage")
 	go func() {
@@ -41,36 +39,14 @@ func StartStorageWorker(appState *state.AppState, recordChan <-chan []float32) {
 	}()
 }
 
-// WriteAudio converts float32 stereo chunks to int16 and writes them to the provided writer in a single batched buffer write.
+// WriteAudio converts float32 stereo chunks using audio_processing.ConvertStereoFloat32ToPCM16LE
+// and writes them to the provided writer in a single batched buffer write.
 // Returns the number of stereo samples (pairs) written.
 func WriteAudio(w io.Writer, chunk []float32) (int, error) {
-	numPairs := len(chunk) / 2
-	if numPairs == 0 {
+	pcm := audio_processing.ConvertStereoFloat32ToPCM16LE(chunk)
+	if len(pcm) == 0 {
 		return 0, nil
 	}
-
-	buf := make([]byte, numPairs*4)
-	for i := 0; i < numPairs; i++ {
-		sL, sR := chunk[i*2], chunk[i*2+1]
-		if sL > 1.0 {
-			sL = 1.0
-		} else if sL < -1.0 {
-			sL = -1.0
-		}
-		if sR > 1.0 {
-			sR = 1.0
-		} else if sR < -1.0 {
-			sR = -1.0
-		}
-
-		iL := int16(sL * 32767)
-		iR := int16(sR * 32767)
-
-		binary.LittleEndian.PutUint16(buf[i*4:], uint16(iL))
-		binary.LittleEndian.PutUint16(buf[i*4+2:], uint16(iR))
-	}
-
-	nBytes, err := w.Write(buf)
+	nBytes, err := w.Write(pcm)
 	return nBytes / 4, err
 }
-

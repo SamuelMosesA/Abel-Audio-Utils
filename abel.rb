@@ -3,7 +3,7 @@ require "digest"
 class Abel < Formula
   desc "Abel - Audio Recorder with AI Transcription and Translation"
   homepage "https://github.com/SamuelMosesA/Abel-Audio-Utils"
-  url "https://github.com/SamuelMosesA/Abel-Audio-Utils.git", tag: "v0.1.0"
+  url "https://github.com/SamuelMosesA/Abel-Audio-Utils.git", tag: "v0.2.0"
   head "https://github.com/SamuelMosesA/Abel-Audio-Utils.git", branch: "main"
 
   depends_on "go" => :build
@@ -28,9 +28,17 @@ class Abel < Formula
     system "go", "run", "github.com/swaggo/swag/cmd/swag@latest", "init", "-g", "src/backend/main.go"
 
     # 4. Build backend
-    system "go", "build", "-o", bin/"abel", "src/backend/main.go"
+    system "go", "build", "-o", (bin/"abel").to_s, "src/backend/main.go"
 
-    # 5. Copy example config to etc
+    # 5. Install service wrapper script
+    bin.install "scripts/abel-service.sh" => "abel-service"
+    chmod 0755, bin/"abel-service"
+
+    # 6. Install docker-compose and observability configs to pkgshare
+    pkgshare.install "docker-compose.yaml"
+    pkgshare.install "observability"
+
+    # 7. Copy example config to etc
     (etc/"abel").mkpath
     etc.install "config/config-example.yaml" => "abel/config.yaml" unless File.exist?(etc/"abel/config.yaml")
   end
@@ -46,7 +54,7 @@ class Abel < Formula
   end
 
   service do
-    run [opt_bin/"abel"]
+    run [opt_bin/"abel-service"]
     keep_alive true
     log_path var/"log/abel.log"
     error_log_path var/"log/abel.errors.log"
@@ -55,5 +63,7 @@ class Abel < Formula
   test do
     assert_predicate bin/"abel", :exist?
     assert_predicate bin/"abel", :executable?
+    assert_predicate bin/"abel-service", :exist?
+    assert_predicate bin/"abel-service", :executable?
   end
 end

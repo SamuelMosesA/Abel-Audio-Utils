@@ -2,3 +2,8 @@
 /coverage.out
 # curl cookie jars from manual testing
 cookie*.txt
+# session keys from local testing
+session.key
+*.key
+cloud_drive/
+recordings/

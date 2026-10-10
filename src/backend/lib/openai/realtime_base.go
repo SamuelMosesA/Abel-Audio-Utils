@@ -15,11 +15,13 @@ type Event struct {
 	EventID string `json:"event_id,omitempty"`
 }
 
+// SessionUpdateEvent configures Realtime session parameters upon initial connection.
 type SessionUpdateEvent struct {
 	Type    string        `json:"type"`
 	Session SessionConfig `json:"session"`
 }
 
+// SessionConfig details the audio format, modalities, and instructions for Realtime AI.
 type SessionConfig struct {
 	Type              string       `json:"type,omitempty"`
 	Modalities        []string     `json:"modalities,omitempty"`
@@ -30,17 +32,20 @@ type SessionConfig struct {
 	Audio             *AudioConfig `json:"audio,omitempty"`
 }
 
+// AudioConfig sets input and output audio streaming parameters for OpenAI Realtime.
 type AudioConfig struct {
 	Input  *InputConfig  `json:"input,omitempty"`
 	Output *OutputConfig `json:"output,omitempty"`
 }
 
+// InputConfig specifies input format and transcription parameters.
 type InputConfig struct {
 	Format        *InputFormat         `json:"format,omitempty"`
 	Transcription *TranscriptionConfig `json:"transcription,omitempty"`
 	TurnDetection *TurnDetectionConfig `json:"turn_detection,omitempty"`
 }
 
+// TurnDetectionConfig configures voice activity detection (VAD) thresholds.
 type TurnDetectionConfig struct {
 	Type              string  `json:"type,omitempty"`
 	Threshold         float64 `json:"threshold,omitempty"`
@@ -48,45 +53,51 @@ type TurnDetectionConfig struct {
 	SilenceDurationMs int     `json:"silence_duration_ms,omitempty"`
 }
 
+// InputFormat specifies audio encoding and rate for input streams.
 type InputFormat struct {
 	Type string `json:"type,omitempty"`
 	Rate int    `json:"rate,omitempty"`
 }
 
+// TranscriptionConfig defines the model and language for live speech-to-text.
 type TranscriptionConfig struct {
 	Model    string `json:"model,omitempty"`
 	Language string `json:"language,omitempty"`
 }
 
+// OutputConfig defines the synthesized speech voice and output format.
 type OutputConfig struct {
 	Format   *OutputFormat `json:"format,omitempty"`
 	Language string        `json:"language,omitempty"`
 	Voice    string        `json:"voice,omitempty"`
 }
 
+// OutputFormat specifies output audio encoding and sample rate.
 type OutputFormat struct {
 	Type string `json:"type,omitempty"`
 	Rate int    `json:"rate,omitempty"`
 }
 
+// InputAudioAppendEvent sends a base64-encoded PCM audio frame to OpenAI Realtime.
 type InputAudioAppendEvent struct {
 	Type  string `json:"type"`
 	Audio string `json:"audio"` // base64
 }
 
+// RealtimeSession represents an active concurrent connection to OpenAI Realtime API.
 type RealtimeSession struct {
-	Language     string
-	AudioIn      chan []byte 
-	AudioOut     chan []float32
-	ctx          context.Context
-	cancel       context.CancelFunc
-	lastTokens   int64
+	Language   string
+	AudioIn    chan []byte
+	AudioOut   chan []float32
+	ctx        context.Context
+	cancel     context.CancelFunc
+	lastTokens int64
 }
 
 // OpenAIManager is a wrapper that delegates to separate Transcription and Translation managers
 type OpenAIManager struct {
 	Config           *config.Config
-	OriginalLanguage   string // Normalized code (e.g., "en")
+	OriginalLanguage string // Normalized code (e.g., "en")
 	Transcriber      *TranscriptionManager
 	Translator       *TranslationManager
 	Enabled          atomic.Bool
@@ -104,7 +115,7 @@ func (m *OpenAIManager) isOriginalLanguage(lang string) bool {
 func NewOpenAIManager(cfg *config.Config, appState *state.AppState, apiKey, translateModel, transcribeModel, voice, originalLang string) (*OpenAIManager, error) {
 	transcriber, _ := NewTranscriptionManager(cfg, appState, apiKey, transcribeModel, originalLang, 100, 1000, 100)
 	translator, _ := NewTranslationManager(cfg, appState, apiKey, translateModel, voice, originalLang, 100, 1000, 100)
-	
+
 	return &OpenAIManager{
 		Config:           cfg,
 		OriginalLanguage: originalLang,
@@ -158,13 +169,24 @@ func (m *OpenAIManager) GetChannel(language string) chan []float32 {
 	return m.Translator.GetChannel(language)
 }
 
-func (m *OpenAIManager) PushAudio(chunk []float32) {
+func (m *OpenAIManager) OnNewAudioChunk(chunk []float32) {
 	if !m.Enabled.Load() {
 		return
 	}
 	// Push to both - they handle their own language filtering
-	m.Transcriber.PushAudio(chunk)
-	m.Translator.PushAudio(chunk)
+	m.Transcriber.OnNewAudioChunk(chunk)
+	m.Translator.OnNewAudioChunk(chunk)
+}
+
+func (m *OpenAIManager) PushAudio(chunk []float32) {
+	m.OnNewAudioChunk(chunk)
+}
+
+func (m *OpenAIManager) GetListenerCount(language string) int {
+	if m.isOriginalLanguage(language) {
+		return m.Transcriber.GetListenerCount(language)
+	}
+	return m.Translator.GetListenerCount(language)
 }
 
 func DecodeAudioDelta(delta64 string, targetRate int) ([]float32, error) {
@@ -205,8 +227,8 @@ func DecodeAudioDelta(delta64 string, targetRate int) ([]float32, error) {
 			val = src[idx0]*(1.0-float32(t)) + src[idx1]*float32(t)
 		}
 
-		floats[i*2] = val     // Left channel
-		floats[i*2+1] = val   // Right channel
+		floats[i*2] = val   // Left channel
+		floats[i*2+1] = val // Right channel
 	}
 
 	return floats, nil

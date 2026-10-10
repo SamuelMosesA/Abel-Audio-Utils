@@ -28,8 +28,8 @@ cloud_drive_location: "./cloud_drive"
 
 # Translation (OpenAI)
 # openai_api_key: "YOUR_API_KEY_HERE"
-openai_translate_model: "gpt-4o-realtime-preview"
-openai_transcribe_model: "gpt-4o-realtime-preview"
+openai_translate_model: "gpt-realtime-translate"
+openai_transcribe_model: "gpt-realtime-whisper"
 openai_voice: "alloy"
 
 # AI Language Settings

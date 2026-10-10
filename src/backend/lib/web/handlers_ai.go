@@ -13,6 +13,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type LanguageStatus struct {
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	Blocked   bool   `json:"blocked"`
+	Active    bool   `json:"active"`
+	Listeners int    `json:"listeners"`
+}
+
 // @Summary Control AI streams
 // @Description Toggles master AI switch or stops a specific language translation
 // @Tags AI
@@ -32,6 +40,7 @@ func UpdateAIStreams(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 			Action    string `json:"action"`
 			Enabled   *bool  `json:"enabled"`
 			Language  string `json:"language"`
+			Blocked   *bool  `json:"blocked"`
 			Subtitles bool   `json:"subtitles"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -40,6 +49,9 @@ func UpdateAIStreams(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 		}
 
 		var shouldCloseAll bool
+		var shouldStopLanguage bool
+		var resolvedStopLanguage string
+
 		state.Update[state.AIConfig](appState, state.SectionAI, func(s *state.AIConfig) {
 			if req.Action == "toggle_master" && req.Enabled != nil {
 				logger.Info("Toggling master AI state",
@@ -54,6 +66,20 @@ func UpdateAIStreams(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 					slog.Bool("ai.enabled", s.IsEnabled()),
 				)
 			}
+
+			if req.Action == "toggle_language" && req.Language != "" && req.Blocked != nil {
+				code := cfg.ResolveLanguageCode(req.Language)
+				s.SetBlocked(code, *req.Blocked)
+				s.SetBlocked(req.Language, *req.Blocked)
+				if *req.Blocked {
+					shouldStopLanguage = true
+					resolvedStopLanguage = cfg.ResolveLanguageName(req.Language)
+				}
+				logger.Info("Language killswitch toggled",
+					slog.String("ai.language", req.Language),
+					slog.Bool("ai.blocked", *req.Blocked),
+				)
+			}
 		})
 
 		// Perform side-effects OUTSIDE of the lock
@@ -62,6 +88,11 @@ func UpdateAIStreams(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 			if shouldCloseAll {
 				appState.Translator.CloseAll()
 			}
+		}
+
+		if shouldStopLanguage && appState.Translator != nil {
+			appState.Translator.StopSession(resolvedStopLanguage, true)
+			appState.Translator.StopSession(req.Language, true)
 		}
 
 		if req.Action == "stop_translation" && req.Language != "" {
@@ -80,22 +111,61 @@ func UpdateAIStreams(appState *state.AppState, cfg *config.Config) gin.HandlerFu
 }
 
 // @Summary Get AI streams status
-// @Description Returns active sessions and master state
+// @Description Returns active sessions, configured languages, and master state
 // @Tags AI
 // @Produce json
 // @Success 200 {object} object "AI Streams Status"
 // @Failure 401 {object} string "Unauthorized"
 // @Router /api/ai/streams [get]
-func GetAIStreamsStatus(appState *state.AppState) gin.HandlerFunc {
+func GetAIStreamsStatus(appState *state.AppState, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		status := gin.H{
 			"masterEnabled": appState.AI().IsEnabled(),
 		}
+		var sessions []state.SessionInfo
 		if appState.Translator != nil {
-			status["sessions"] = appState.Translator.ListSessions()
+			sessions = appState.Translator.ListSessions()
 		} else {
-			status["sessions"] = []state.SessionInfo{}
+			sessions = []state.SessionInfo{}
 		}
+		status["sessions"] = sessions
+
+		languages := make([]LanguageStatus, 0)
+		if cfg != nil {
+			activeLanguages := make(map[string]bool)
+			for _, s := range sessions {
+				activeLanguages[strings.ToLower(s.Language)] = true
+				if code := cfg.ResolveLanguageCode(s.Language); code != "" {
+					activeLanguages[strings.ToLower(code)] = true
+				}
+			}
+
+			aiState := appState.AI()
+			for _, lang := range cfg.AILanguages {
+				codeLower := strings.ToLower(lang.Code)
+				nameLower := strings.ToLower(lang.Name)
+				blocked := aiState.IsBlocked(lang.Code) || aiState.IsBlocked(lang.Name)
+				active := activeLanguages[codeLower] || activeLanguages[nameLower]
+
+				listeners := 0
+				if appState.Translator != nil {
+					listeners = appState.Translator.GetListenerCount(lang.Code)
+					if listeners == 0 && lang.Code != lang.Name {
+						listeners = appState.Translator.GetListenerCount(lang.Name)
+					}
+				}
+
+				languages = append(languages, LanguageStatus{
+					Code:      lang.Code,
+					Name:      lang.Name,
+					Blocked:   blocked,
+					Active:    active,
+					Listeners: listeners,
+				})
+			}
+		}
+		status["languages"] = languages
+
 		c.JSON(http.StatusOK, status)
 	}
 }
@@ -146,6 +216,12 @@ func SubtitlesHandler(appState *state.AppState, cfg *config.Config) gin.HandlerF
 		connLogger.Info("Subtitles connection requested",
 			slog.String("client.ip", c.Request.RemoteAddr),
 		)
+
+		if appState.IsLanguageBlocked(lang) || appState.IsLanguageBlocked(resolvedLang) {
+			connLogger.Warn("Subtitles connection rejected: language is blocked via killswitch")
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Language translation is blocked"})
+			return
+		}
 
 		if appState.Translator == nil {
 			connLogger.Error("Subtitles handler aborted: Translator is nil")

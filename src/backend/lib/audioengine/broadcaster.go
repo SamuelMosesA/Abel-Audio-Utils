@@ -6,8 +6,9 @@ import (
 	"abel/src/backend/lib/telemetry"
 	"context"
 	"encoding/binary"
-	"github.com/gorilla/websocket"
 	"math"
+
+	"github.com/gorilla/websocket"
 )
 
 type LiveAudioPublisher interface {
@@ -81,7 +82,7 @@ func StartAudioBroadcaster(appState *state.AppState, cfg *config.Config, playbac
 
 			// Push to AI for translation
 			if appState.Translator != nil {
-				appState.Translator.PushAudio(chunk)
+				appState.Translator.OnNewAudioChunk(chunk)
 			}
 
 			if telemetry.ProcessedChunks != nil {

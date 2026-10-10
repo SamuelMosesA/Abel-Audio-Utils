@@ -1,8 +1,9 @@
 package web
 
 import (
-	"abel/src/backend/lib/audioengine"
+	"abel/src/backend/lib/audioengine/audio_processing"
 	"abel/src/backend/lib/config"
+	"abel/src/backend/lib/recording"
 	"abel/src/backend/lib/state"
 	"embed"
 	"fmt"
@@ -18,8 +19,14 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audioengine.HLSPublisher, staticFiles embed.FS) *gin.Engine {
-	processor := NewRecordingProcessor(cfg)
+// NewRouter constructs the Gin HTTP engine with authenticated admin routes and public endpoints.
+func NewRouter(appState *state.AppState, cfg *config.Config, broadcaster *audio_processing.LiveAudioBroadcaster, staticFiles embed.FS) *gin.Engine {
+	processor := recording.NewRecordingProcessor(cfg)
+	if appState != nil {
+		processor.SetOnUpdate(func() {
+			appState.Broadcast(state.SectionRecording)
+		})
+	}
 	// Switch from default to release mode by default, standard logger in gin is noisy
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -49,7 +56,11 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 		MaxAge:           12 * time.Hour,
 	}))
 
-	store := cookie.NewStore([]byte("secret"))
+	sessionSecret, err := config.ResolveSessionSecret(cfg)
+	if err != nil {
+		fmt.Printf("[Auth] Warning: error resolving persistent session secret: %v\n", err)
+	}
+	store := cookie.NewStore(sessionSecret)
 	store.Options(sessions.Options{
 		Path:     "/",
 		MaxAge:   86400 * 7, // 7 days
@@ -57,6 +68,7 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 		Secure:   false, // Set to true if using HTTPS
 		SameSite: http.SameSiteLaxMode,
 	})
+	r.Use(CookieSanitizerMiddleware("abel_session", sessionSecret))
 	r.Use(sessions.Sessions("abel_session", store))
 
 	subFS, _ := fs.Sub(staticFiles, "static")
@@ -103,17 +115,17 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 	api := r.Group("/api")
 	{
 		// Auth
+		api.GET("/auth/session", SessionAuthMiddleware(appState), GetSessionHandler())
 		api.POST("/auth/session", LoginHandler(cfg, appState))
+		api.DELETE("/auth/session", LogoutHandler(appState))
 
 		// Audio
 		audio := api.Group("/audio")
 		{
 			audio.GET("/devices", DevicesHandler(appState))
 			audio.GET("/config", GetAudioConfig(appState))
-			audio.GET("/stream", StreamHandler())
-			audio.GET("/stream/*lang", StreamHandler())
-			audio.GET("/hls/:lang/index.m3u8", HLSPlaylistHandler(appState, cfg, hlsPublisher))
-			audio.GET("/hls/:lang/:segment", HLSSegmentHandler(hlsPublisher))
+			audio.GET("/stream", StreamHandler(appState, cfg, broadcaster))
+			audio.GET("/stream/*lang", StreamHandler(appState, cfg, broadcaster))
 		}
 
 		// Recordings
@@ -128,7 +140,7 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 		{
 			ai.GET("/subtitles", SubtitlesHandler(appState, cfg))
 			ai.GET("/subtitles/*lang", SubtitlesHandler(appState, cfg))
-			ai.GET("/streams", GetAIStreamsStatus(appState))
+			ai.GET("/streams", GetAIStreamsStatus(appState, cfg))
 			ai.GET("/config", GetAIConfig(cfg))
 		}
 
@@ -150,8 +162,8 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 	return r
 }
 
-func RegisterAdminRoutes(r *gin.RouterGroup, appState *state.AppState, cfg *config.Config, processor *RecordingProcessor) {
-	r.Use(SessionAuthMiddleware())
+func RegisterAdminRoutes(r *gin.RouterGroup, appState *state.AppState, cfg *config.Config, processor *recording.RecordingProcessor) {
+	r.Use(SessionAuthMiddleware(appState))
 	{
 		r.PATCH("/audio/config", UpdateAudioConfig(appState, cfg))
 		r.POST("/audio/restart", RestartAudioEngine(appState, cfg))

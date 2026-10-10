@@ -12,6 +12,14 @@ export interface TranslationSession {
     subtitles: boolean;
 }
 
+export interface LanguageStatus {
+    code: string;
+    name: string;
+    blocked: boolean;
+    active: boolean;
+    listeners: number;
+}
+
 export interface MeterState {
     L: number;
     R: number;
@@ -28,10 +36,9 @@ export interface AppStatus {
     cloudDriveLocation: string;
     translations: TranslationSession[];
     serverUrl: string;
-    ssid: string;
 }
 
-import { fetchWithSync } from "./utils/api";
+import { fetchWithSync, setUnauthorizedHandler } from "./utils/api";
 
 export class AudioStore {
     isRunning = $state(false);
@@ -103,6 +110,7 @@ export class AudioStore {
 export class AIStore {
     aiMasterEnabled = $state(false);
     translations = $state<TranslationSession[]>([]);
+    languages = $state<LanguageStatus[]>([]);
     aiConfig = $state<{ languages: { code: string, name: string }[], originalLanguage: string }>({
         languages: [],
         originalLanguage: "en"
@@ -117,6 +125,9 @@ export class AIStore {
                 const aiData = await res.json();
                 this.aiMasterEnabled = aiData.masterEnabled;
                 this.translations = aiData.sessions || [];
+                if (Array.isArray(aiData.languages)) {
+                    this.languages = aiData.languages;
+                }
             }
         } catch (e) {
             console.error("Error syncing AI status", e);
@@ -164,6 +175,27 @@ export class AIStore {
         await this.sync();
     }
 
+    async toggleLanguageKillswitch(language: string, blocked: boolean) {
+        const res = await fetchWithSync("/api/ai/streams", {
+            method: "POST",
+            body: JSON.stringify({ 
+                action: "toggle_language", 
+                language, 
+                blocked 
+            })
+        });
+        
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            this.ui.showNotification(data.error || "Failed to toggle language killswitch", "error");
+        }
+        await this.sync();
+    }
+
+    async refreshAIStreams() {
+        await Promise.all([this.sync(), this.fetchConfig()]);
+    }
+
     resolveLanguageName(code: string): string {
         const lang = this.aiConfig.languages.find(l => l.code === code);
         return lang ? lang.name : code;
@@ -173,7 +205,6 @@ export class AIStore {
 export class SystemStore {
     wsConnected = $state(false);
     serverUrl = $state("");
-    ssid = $state("");
     isAuthenticated = $state(false);
     sessionId = $state("");
 
@@ -181,15 +212,66 @@ export class SystemStore {
     #sse: EventSource | null = null;
     onMessage: ((dv: DataView) => void) | null = null;
 
-    constructor(private ui: UIStore, private audio: AudioStore, private ai: AIStore) {
+    constructor(private ui: UIStore, private audio: AudioStore, private ai: AIStore, private files?: FileStore) {
         if (typeof window !== 'undefined' && window.localStorage) {
             this.sessionId = localStorage.getItem("session_id") || "";
-            this.isAuthenticated = !!this.sessionId;
-            
-            if (this.isAuthenticated && window.location.protocol.startsWith('http')) {
-                this.setupSSE();
-                this.syncConnection();
+            this.isAuthenticated = false;
+        }
+
+        setUnauthorizedHandler(() => {
+            this.clearSession();
+            if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+                const target = window.location.pathname + window.location.search;
+                window.location.href = `/login?redirect=${encodeURIComponent(target)}&reason=expired`;
             }
+        });
+    }
+
+    async validateSession(): Promise<boolean> {
+        try {
+            const res = await fetch("/api/auth/session", { credentials: "include" });
+            if (res.ok) {
+                const data = await res.json();
+                this.setAuthenticated(data.session || "", data.username);
+                return true;
+            } else {
+                this.clearSession();
+                return false;
+            }
+        } catch (e) {
+            console.error("Error validating session", e);
+            return false;
+        }
+    }
+
+    setAuthenticated(sessionId: string, username?: string) {
+        this.sessionId = sessionId;
+        this.isAuthenticated = true;
+        if (typeof window !== 'undefined' && window.localStorage) {
+            if (sessionId) localStorage.setItem("session_id", sessionId);
+            if (username) localStorage.setItem("admin_user", username);
+        }
+        if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+            this.setupSSE();
+            this.syncConnection();
+        }
+    }
+
+    clearSession() {
+        this.isAuthenticated = false;
+        this.sessionId = "";
+        if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.removeItem("session_id");
+            localStorage.removeItem("admin_user");
+        }
+        if (this.#ws) {
+            this.#ws.close();
+            this.#ws = null;
+        }
+        this.wsConnected = false;
+        if (this.#sse) {
+            this.#sse.close();
+            this.#sse = null;
         }
     }
 
@@ -199,7 +281,6 @@ export class SystemStore {
             if (res.ok) {
                 const conn = await res.json();
                 this.serverUrl = conn.serverUrl;
-                this.ssid = conn.ssid;
             }
         } catch (e) {
             console.error("Error syncing connection", e);
@@ -226,10 +307,17 @@ export class SystemStore {
         };
     }
 
-    private handleRemoteUpdate(change: { section: string, sessionId: string }) {
-        if (change.section === "ai") this.ai.sync();
-        else if (change.section === "interface" || change.section === "recording") this.audio.sync();
-        else this.audio.sync();
+    handleRemoteUpdate(change: { section: string, sessionId: string }) {
+        if (change.section === "ai") {
+            this.ai.sync();
+        } else if (change.section === "recording") {
+            this.audio.sync();
+            this.files?.fetchFiles();
+        } else if (change.section === "interface") {
+            this.audio.sync();
+        } else {
+            this.audio.sync();
+        }
         
         this.ui.showNotification(`Session ${change.sessionId.slice(0, 4)} updated ${change.section}`, change.section);
     }
@@ -270,18 +358,7 @@ export class SystemStore {
 
             if (res.ok) {
                 const data = await res.json();
-                if (typeof window !== 'undefined' && window.localStorage) {
-                    localStorage.setItem("admin_user", username);
-                }
-                if (data.session) {
-                    this.sessionId = data.session;
-                    if (typeof window !== 'undefined' && window.localStorage) {
-                        localStorage.setItem("session_id", data.session);
-                    }
-                }
-                this.isAuthenticated = true;
-                this.setupSSE();
-                this.syncConnection();
+                this.setAuthenticated(data.session || "", username);
                 return true;
             }
             return false;
@@ -291,16 +368,18 @@ export class SystemStore {
         }
     }
 
-    logout() {
-        if (typeof window !== 'undefined' && window.localStorage) {
-            localStorage.removeItem("admin_user");
-            localStorage.removeItem("session_id");
+    async logout() {
+        try {
+            await fetch("/api/auth/session", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include"
+            });
+        } catch (e) {
+            console.error("Logout request error:", e);
         }
-        this.isAuthenticated = false;
-        this.sessionId = "";
+        this.clearSession();
         this.ui.currentView = "landing";
-        if (this.#ws) { this.#ws.close(); this.#ws = null; }
-        if (this.#sse) { this.#sse.close(); this.#sse = null; }
     }
 }
 
@@ -459,7 +538,7 @@ export class AppState {
     visuals: AudioVisuals;
 
     constructor() {
-        this.system = new SystemStore(this.ui, this.audio, this.ai);
+        this.system = new SystemStore(this.ui, this.audio, this.ai, this.files);
         this.visuals = new AudioVisuals(this.system);
         
         if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {

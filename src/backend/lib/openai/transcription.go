@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,10 +15,12 @@ import (
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
 	"abel/src/backend/lib/telemetry"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/gorilla/websocket"
+	sync_map "github.com/zolstein/sync-map"
 )
 
 type TranscriptionManager struct {
@@ -31,13 +34,14 @@ type TranscriptionManager struct {
 	SubtitleBufferSize int
 	Enabled            atomic.Bool
 
-	Sessions      sync.Map // map[string]*RealtimeSession
-	Subscribers   sync.Map // map[string][]chan string
-	LastRestart   sync.Map // map[string]time.Time
+	Sessions      sync_map.Map[string, *RealtimeSession]
+	Subscribers   sync_map.Map[string, []chan string]
+	LastRestart   sync_map.Map[string, time.Time]
 	Mu            sync.Mutex
 	OnStateChange func()
 }
 
+// NewTranscriptionManager creates a live speech-to-text session manager.
 func NewTranscriptionManager(cfg *config.Config, appState *state.AppState, apiKey, model, originalLang string, audioInSize, audioOutSize, subtitleSize int) (*TranscriptionManager, error) {
 	return &TranscriptionManager{
 		Config:             cfg,
@@ -60,28 +64,50 @@ func (m *TranscriptionManager) SetOnStateChange(fn func()) {
 }
 
 func (m *TranscriptionManager) CloseAll() {
-	m.Sessions.Range(func(key, value interface{}) bool {
-		s := value.(*RealtimeSession)
-		s.cancel()
+	m.Sessions.Range(func(_ string, session *RealtimeSession) bool {
+		session.cancel()
 		return true
 	})
 }
 
 func (m *TranscriptionManager) ListSessions() []state.SessionInfo {
 	var list []state.SessionInfo
-	m.Sessions.Range(func(key, value interface{}) bool {
-		lang := key.(string)
+	m.Sessions.Range(func(lang string, _ *RealtimeSession) bool {
 		list = append(list, state.SessionInfo{
-			Language: lang,
+			Language:  lang,
+			Listeners: m.GetListenerCount(lang),
+			Subtitles: true,
 		})
 		return true
 	})
 	return list
 }
 
+func (m *TranscriptionManager) GetListenerCount(language string) int {
+	if language == "" {
+		language = m.OriginalLanguage
+	}
+	code := m.Config.ResolveLanguageCode(language)
+	name := m.Config.ResolveLanguageName(language)
+
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+
+	count := 0
+	if subs, ok := m.Subscribers.Load(code); ok {
+		count += len(subs)
+	}
+	if strings.ToLower(code) != strings.ToLower(name) {
+		if subs, ok := m.Subscribers.Load(name); ok {
+			count += len(subs)
+		}
+	}
+	return count
+}
+
 func (m *TranscriptionManager) StopSession(language string, subtitles bool) {
-	if val, ok := m.Sessions.Load(language); ok {
-		val.(*RealtimeSession).cancel()
+	if session, ok := m.Sessions.Load(language); ok {
+		session.cancel()
 	}
 }
 
@@ -91,10 +117,7 @@ func (m *TranscriptionManager) GetSubtitles(language string) (chan string, func(
 	}
 	subCh := make(chan string, m.SubtitleBufferSize)
 	m.Mu.Lock()
-	var subs []chan string
-	if val, ok := m.Subscribers.Load(language); ok {
-		subs = val.([]chan string)
-	}
+	subs, _ := m.Subscribers.Load(language)
 	subs = append(subs, subCh)
 	m.Subscribers.Store(language, subs)
 	m.Mu.Unlock()
@@ -102,8 +125,7 @@ func (m *TranscriptionManager) GetSubtitles(language string) (chan string, func(
 	cleanup := func() {
 		m.Mu.Lock()
 		defer m.Mu.Unlock()
-		if val, ok := m.Subscribers.Load(language); ok {
-			oldSubs := val.([]chan string)
+		if oldSubs, ok := m.Subscribers.Load(language); ok {
 			newSubs := make([]chan string, 0, len(oldSubs))
 			for _, ch := range oldSubs {
 				if ch != subCh {
@@ -128,14 +150,14 @@ func (m *TranscriptionManager) GetChannel(language string) chan []float32 {
 	if language == "" {
 		language = m.OriginalLanguage
 	}
-	if val, ok := m.Sessions.Load(language); ok {
-		return val.(*RealtimeSession).AudioOut
+	if session, ok := m.Sessions.Load(language); ok {
+		return session.AudioOut
 	}
 
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
-	if val, ok := m.Sessions.Load(language); ok {
-		return val.(*RealtimeSession).AudioOut
+	if session, ok := m.Sessions.Load(language); ok {
+		return session.AudioOut
 	}
 
 	audioOut := make(chan []float32, m.AudioOutBufferSize)
@@ -154,11 +176,14 @@ func (m *TranscriptionManager) GetChannel(language string) chan []float32 {
 }
 
 func (m *TranscriptionManager) PushAudio(chunk []float32) {
+	m.OnNewAudioChunk(chunk)
+}
+
+func (m *TranscriptionManager) OnNewAudioChunk(chunk []float32) {
 	if !m.Enabled.Load() {
 		return
 	}
-	// Downsample 48kHz to 24kHz
-	pcm := m.downsample(chunk)
+	pcm := DownsampleChunkForAI(chunk, m.AppState, m.Config)
 	if len(pcm) == 0 {
 		return
 	}
@@ -166,14 +191,11 @@ func (m *TranscriptionManager) PushAudio(chunk []float32) {
 	logger := slog.With("component", "openai")
 
 	// Auto-start if subscribers exist
-	m.Subscribers.Range(func(key, value interface{}) bool {
-		lang := key.(string)
+	m.Subscribers.Range(func(lang string, _ []chan string) bool {
 		if _, ok := m.Sessions.Load(lang); !ok {
 			now := time.Now()
-			if last, ok := m.LastRestart.Load(lang); ok {
-				if now.Sub(last.(time.Time)) < 5*time.Second {
-					return true
-				}
+			if last, ok := m.LastRestart.Load(lang); ok && now.Sub(last) < 5*time.Second {
+				return true
 			}
 			m.LastRestart.Store(lang, now)
 			logger.Info("Auto-starting transcription", slog.String("ai.language", lang))
@@ -182,9 +204,7 @@ func (m *TranscriptionManager) PushAudio(chunk []float32) {
 		return true
 	})
 
-	m.Sessions.Range(func(key, value interface{}) bool {
-		s := value.(*RealtimeSession)
-		
+	m.Sessions.Range(func(_ string, s *RealtimeSession) bool {
 		// Push raw audio directly to output for low-latency bypass
 		select {
 		case s.AudioOut <- chunk:
@@ -198,67 +218,6 @@ func (m *TranscriptionManager) PushAudio(chunk []float32) {
 		}
 		return true
 	})
-}
-
-func (m *TranscriptionManager) downsample(chunk []float32) []byte {
-	srcRate := int(m.AppState.Config().SampleRate())
-	if srcRate <= 0 {
-		srcRate = m.Config.SampleRate
-	}
-	dstRate := 24000 // OpenAI Realtime expects 24kHz
-
-	// If sample rates are already equal to 24000 (mono conversion only)
-	if srcRate == dstRate {
-		downsampled := make([]int16, len(chunk)/2)
-		for i := 0; i < len(chunk)/2; i++ {
-			avg := (chunk[i*2] + chunk[i*2+1]) / 2.0
-			if avg > 1.0 { avg = 1.0 } else if avg < -1.0 { avg = -1.0 }
-			downsampled[i] = int16(avg * 32767)
-		}
-		bytes := make([]byte, len(downsampled)*2)
-		for i, v := range downsampled {
-			bytes[i*2] = byte(v & 0xff)
-			bytes[i*2+1] = byte(v >> 8)
-		}
-		return bytes
-	}
-
-	// General downsampling using accumulators/ratios
-	ratio := float64(srcRate) / float64(dstRate)
-	srcFrames := len(chunk) / 2
-	dstFrames := int(float64(srcFrames) / ratio)
-	if dstFrames <= 0 {
-		return nil
-	}
-
-	downsampled := make([]int16, dstFrames)
-	for i := 0; i < dstFrames; i++ {
-		startFrame := int(float64(i) * ratio)
-		endFrame := int(float64(i+1) * ratio)
-		if endFrame > srcFrames {
-			endFrame = srcFrames
-		}
-		if endFrame <= startFrame {
-			endFrame = startFrame + 1
-		}
-
-		var sum float32
-		count := 0
-		for f := startFrame; f < endFrame; f++ {
-			sum += chunk[f*2] + chunk[f*2+1]
-			count += 2
-		}
-		avg := sum / float32(count)
-		if avg > 1.0 { avg = 1.0 } else if avg < -1.0 { avg = -1.0 }
-		downsampled[i] = int16(avg * 32767)
-	}
-
-	bytes := make([]byte, len(downsampled)*2)
-	for i, v := range downsampled {
-		bytes[i*2] = byte(v & 0xff)
-		bytes[i*2+1] = byte(v >> 8)
-	}
-	return bytes
 }
 
 func (m *TranscriptionManager) runSession(s *RealtimeSession) {
@@ -295,7 +254,7 @@ func (m *TranscriptionManager) runSession(s *RealtimeSession) {
 	config := SessionUpdateEvent{
 		Type: "session.update",
 		Session: SessionConfig{
-			Type:       "transcription",
+			Type: "transcription",
 			Audio: &AudioConfig{
 				Input: &InputConfig{
 					Format: &InputFormat{Type: "audio/pcm", Rate: 24000},
@@ -327,11 +286,10 @@ func (m *TranscriptionManager) runSession(s *RealtimeSession) {
 				raw["type"] == "conversation.item.input_audio_transcription.completed" {
 				delta, _ := raw["delta"].(string)
 				if delta == "" {
-					// For 'completed', the text is in 'transcript' field
 					delta, _ = raw["transcript"].(string)
 				}
 				if delta != "" {
-					m.broadcastSubtitle(s.Language, delta)
+					BroadcastSubtitle(&m.Subscribers, s.Language, delta)
 				}
 			} else if raw["type"] == "response.done" {
 				if respObj, ok := raw["response"].(map[string]interface{}); ok {
@@ -373,19 +331,6 @@ func (m *TranscriptionManager) runSession(s *RealtimeSession) {
 			}
 		case <-s.ctx.Done():
 			return
-		}
-	}
-}
-
-func (m *TranscriptionManager) broadcastSubtitle(language, text string) {
-	if val, ok := m.Subscribers.Load(language); ok {
-		subs := val.([]chan string)
-		payload, _ := json.Marshal(map[string]interface{}{"text": text, "tokens": 0})
-		for _, ch := range subs {
-			select {
-			case ch <- string(payload):
-			default:
-			}
 		}
 	}
 }

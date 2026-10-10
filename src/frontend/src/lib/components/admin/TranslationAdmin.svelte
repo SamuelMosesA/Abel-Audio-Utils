@@ -1,72 +1,133 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import { getAppContext } from "$lib/audioState.svelte";
     const { ai } = getAppContext();
     import Card from "../ui/Card.svelte";
     import Button from "../ui/Button.svelte";
-    import { Languages, XCircle, Users, Activity } from "lucide-svelte";
+    import { Languages, Users, RotateCcw, Ban, CheckCircle2 } from "lucide-svelte";
 
-    async function handleStop(langCode: string) {
-        const langName = ai.resolveLanguageName(langCode);
-        if (confirm(`Are you sure you want to stop the ${langName} translation?`)) {
-            await ai.stopTranslation(langCode);
+    let refreshing = $state(false);
+
+    onMount(() => {
+        void ai.fetchConfig();
+        void ai.sync();
+    });
+
+    async function handleRefresh() {
+        if (refreshing) return;
+        refreshing = true;
+        try {
+            await ai.refreshAIStreams();
+        } finally {
+            refreshing = false;
         }
     }
 
     async function toggleMaster() {
         await ai.setAIMaster(!ai.aiMasterEnabled);
     }
+
+    async function toggleKillswitch(langCode: string, currentlyBlocked: boolean) {
+        await ai.toggleLanguageKillswitch(langCode, !currentlyBlocked);
+    }
+
+    let displayLanguages = $derived.by(() => {
+        if (ai.languages && ai.languages.length > 0) {
+            return ai.languages;
+        }
+        return ai.aiConfig.languages.map(l => ({
+            code: l.code,
+            name: l.name,
+            blocked: false,
+            active: false,
+            listeners: 0
+        }));
+    });
 </script>
 
-<Card title="AI Translation Control">
-    <div class="space-y-6">
-        <div class="flex items-center justify-between bg-muted/30 p-4 rounded-xl border border-border/40">
+<Card 
+    title="AI Translation Controls" 
+    description="Manage live AI translation pipelines, per-language killswitches, and listener feeds."
+>
+    <div class="space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-lg border border-border bg-muted/20">
             <div class="flex items-center gap-3">
-                <div class="flex h-3 w-3 rounded-full {ai.aiMasterEnabled ? 'bg-primary animate-pulse' : 'bg-destructive'}"></div>
-                <div class="flex flex-col">
-                    <span class="text-xxs font-black uppercase tracking-widest text-muted-foreground">AI Master Switch</span>
-                    <span class="text-sm font-bold text-white">{ai.aiMasterEnabled ? 'SYSTEM ACTIVE' : 'SYSTEM DISABLED'}</span>
+                <div class="h-2.5 w-2.5 rounded-full {ai.aiMasterEnabled ? 'bg-primary' : 'bg-muted-foreground'}"></div>
+                <div>
+                    <p class="text-xs font-medium text-muted-foreground">Master Control</p>
+                    <p class="text-sm font-semibold text-foreground">{ai.aiMasterEnabled ? 'AI Translation Enabled' : 'AI Translation Disabled'}</p>
                 </div>
             </div>
-            <Button 
-                variant={ai.aiMasterEnabled ? "destructive" : "primary"}
-                size="sm"
-                onclick={toggleMaster}
-            >
-                {ai.aiMasterEnabled ? "Disable" : "Enable"} AI
-            </Button>
+            <div class="flex items-center gap-2">
+                <Button 
+                    variant="outline"
+                    size="sm"
+                    onclick={handleRefresh}
+                    disabled={refreshing}
+                    title="Refresh AI streams and listener metrics"
+                >
+                    <RotateCcw class="w-3.5 h-3.5 mr-1.5 {refreshing ? 'animate-spin' : ''}" />
+                    {refreshing ? "Refreshing..." : "Refresh"}
+                </Button>
+                <Button 
+                    variant={ai.aiMasterEnabled ? "destructive" : "primary"}
+                    size="sm"
+                    onclick={toggleMaster}
+                >
+                    {ai.aiMasterEnabled ? "Disable AI" : "Enable AI"}
+                </Button>
+            </div>
         </div>
 
-        {#if ai.translations.length === 0}
-            <div class="py-10 flex flex-col items-center justify-center text-muted-foreground/40 space-y-2">
-                <Languages class="w-8 h-8 opacity-20" />
-                <p class="text-xs font-bold uppercase tracking-widest">No Active Sessions</p>
+        {#if displayLanguages.length === 0}
+            <div class="py-8 flex flex-col items-center justify-center text-muted-foreground space-y-2 border border-dashed border-border/60 rounded-lg">
+                <Languages class="w-6 h-6 opacity-40" />
+                <p class="text-xs font-medium">No configured translation languages</p>
             </div>
         {:else}
-            <div class="grid grid-cols-1 gap-3">
-                {#each ai.translations as session}
-                    <div class="flex items-center justify-between p-4 bg-muted/20 border border-border/40 rounded-xl hover:border-primary/20 transition-colors group">
-                        <div class="flex items-center gap-4">
-                            <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center font-black text-primary uppercase text-sm">
-                                {session.language.substring(0, 2)}
+            <div class="space-y-2">
+                <div class="flex items-center justify-between px-1 text-xs font-medium text-muted-foreground">
+                    <span>Configured Languages & Feeds</span>
+                    <span>Kill</span>
+                </div>
+                {#each displayLanguages as lang (lang.code)}
+                    <div class="flex items-center justify-between p-3 border rounded-lg transition-colors {lang.blocked ? 'bg-destructive/5 border-destructive/30' : 'bg-muted/15 border-border'}">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-md flex items-center justify-center font-bold uppercase text-xs {lang.blocked ? 'bg-destructive/15 text-destructive border border-destructive/20' : 'bg-primary/10 text-primary border border-primary/20'}">
+                                {lang.code.substring(0, 2)}
                             </div>
-                            <div class="flex flex-col">
-                                <span class="font-bold text-sm tracking-tight capitalize text-white">{ai.resolveLanguageName(session.language)}</span>
-                                <div class="flex items-center gap-2 text-xxs text-muted-foreground font-black uppercase tracking-widest">
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <p class="font-medium text-sm text-foreground capitalize">{lang.name}</p>
+                                    {#if lang.blocked}
+                                        <span class="inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-destructive/15 text-destructive border border-destructive/20">
+                                            <Ban class="w-2.5 h-2.5" /> Blocked
+                                        </span>
+                                    {:else if lang.active}
+                                        <span class="inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary border border-primary/20">
+                                            <CheckCircle2 class="w-2.5 h-2.5" /> Active
+                                        </span>
+                                    {/if}
+                                </div>
+                                <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
                                     <Users class="w-3 h-3" />
-                                    <span>External Feed</span>
-                                    <span class="mx-1">•</span>
-                                    <span class="text-primary">Subtitles Forced</span>
+                                    <span>{lang.listeners} {lang.listeners === 1 ? 'listener' : 'listeners'}</span>
                                 </div>
                             </div>
                         </div>
 
                         <Button
-                            variant="destructive"
-                            size="icon"
-                            onclick={() => handleStop(session.language)}
-                            title="Kill Session"
+                            variant={lang.blocked ? "outline" : "destructive"}
+                            size="sm"
+                            class="text-xs"
+                            onclick={() => toggleKillswitch(lang.code, lang.blocked)}
+                            title={lang.blocked ? "Unblock language translation" : "Kill: block language translation"}
                         >
-                            <XCircle class="w-4 h-4" />
+                            {#if lang.blocked}
+                                Unblock
+                            {:else}
+                                <Ban class="w-3.5 h-3.5 mr-1" /> Kill
+                            {/if}
                         </Button>
                     </div>
                 {/each}

@@ -44,6 +44,78 @@ func TestLoginHandler(t *testing.T) {
 	})
 }
 
+func TestGetSessionHandler(t *testing.T) {
+	appState := state.NewAppState("", "")
+	cfg := &config.Config{
+		Credentials: map[string]string{"admin": "password"},
+	}
+	router := setupTestRouter(appState, cfg)
+
+	t.Run("Unauthenticated request returns 401", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/api/auth/session", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "Unauthorized session")
+	})
+
+	t.Run("Authenticated session returns 200 with session info", func(t *testing.T) {
+		// Log in first
+		body := map[string]string{"username": "admin", "password": "password"}
+		jsonBody, _ := json.Marshal(body)
+		loginReq, _ := http.NewRequest("POST", "/api/auth/session", bytes.NewBuffer(jsonBody))
+		loginW := httptest.NewRecorder()
+		router.ServeHTTP(loginW, loginReq)
+
+		assert.Equal(t, http.StatusOK, loginW.Code)
+		var loginResp map[string]string
+		json.Unmarshal(loginW.Body.Bytes(), &loginResp)
+		expectedSessID := loginResp["session"]
+		cookie := loginW.Header().Get("Set-Cookie")
+		assert.NotEmpty(t, cookie)
+
+		// Check session
+		req, _ := http.NewRequest("GET", "/api/auth/session", nil)
+		req.Header.Set("Cookie", cookie)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]string
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		assert.Equal(t, "authenticated", resp["status"])
+		assert.Equal(t, "admin", resp["username"])
+		assert.Equal(t, expectedSessID, resp["session"])
+	})
+
+	t.Run("Revoked session returns 401", func(t *testing.T) {
+		// Log in
+		body := map[string]string{"username": "admin", "password": "password"}
+		jsonBody, _ := json.Marshal(body)
+		loginReq, _ := http.NewRequest("POST", "/api/auth/session", bytes.NewBuffer(jsonBody))
+		loginW := httptest.NewRecorder()
+		router.ServeHTTP(loginW, loginReq)
+
+		var loginResp map[string]string
+		json.Unmarshal(loginW.Body.Bytes(), &loginResp)
+		sessID := loginResp["session"]
+		cookie := loginW.Header().Get("Set-Cookie")
+
+		// Revoke session server-side
+		appState.RevokeSession(sessID)
+
+		// Check session
+		req, _ := http.NewRequest("GET", "/api/auth/session", nil)
+		req.Header.Set("Cookie", cookie)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "Session revoked")
+	})
+}
+
 func TestAdminRoutesProtection(t *testing.T) {
 	appState := state.NewAppState("", "")
 	cfg := &config.Config{

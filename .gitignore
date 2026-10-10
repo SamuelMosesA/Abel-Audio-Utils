@@ -5,3 +5,5 @@ cookie*.txt
 # session keys from local testing
 session.key
 *.key
+cloud_drive/
+recordings/

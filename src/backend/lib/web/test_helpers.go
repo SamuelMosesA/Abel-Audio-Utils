@@ -41,6 +41,7 @@ func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, 
 
 	api := r.Group("/api")
 	{
+		api.GET("/auth/session", SessionAuthMiddleware(stateObj), GetSessionHandler())
 		api.POST("/auth/session", LoginHandler(cfg, stateObj))
 		api.DELETE("/auth/session", LogoutHandler(stateObj))
 		RegisterAdminRoutes(api, stateObj, cfg, processor)

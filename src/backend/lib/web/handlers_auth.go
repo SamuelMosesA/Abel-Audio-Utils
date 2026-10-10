@@ -91,6 +91,27 @@ func LogoutHandler(appState *state.AppState) gin.HandlerFunc {
 	}
 }
 
+// @Summary Get auth session status
+// @Description Verifies if the current caller session is valid and returns user details
+// @Tags Auth
+// @Produce json
+// @Success 200 {object} object "Session Active"
+// @Failure 401 {object} object "Unauthorized Session"
+// @Router /api/auth/session [get]
+func GetSessionHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		user, _ := session.Get("username").(string)
+		sessID, _ := session.Get("session_id").(string)
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":   "authenticated",
+			"username": user,
+			"session":  sessID,
+		})
+	}
+}
+
 // SessionAuthMiddleware protects routes using Gin sessions and verifies session revocation
 func SessionAuthMiddleware(stateObj ...*state.AppState) gin.HandlerFunc {
 	var appState *state.AppState

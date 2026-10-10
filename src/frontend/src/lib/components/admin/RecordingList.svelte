@@ -19,6 +19,7 @@
     let startText = $state("0:00");
     let endText = $state("0:00");
     let busy = $state(false);
+    let refreshing = $state(false);
     let pushing = $state("");
     let stopping = $state("");
     let error = $state("");
@@ -31,9 +32,17 @@
 
     onMount(() => {
         void files.fetchFiles();
-        const interval = window.setInterval(() => void files.fetchFiles(), 2000);
-        return () => window.clearInterval(interval);
     });
+
+    async function handleRefresh() {
+        if (refreshing) return;
+        refreshing = true;
+        try {
+            await files.fetchFiles();
+        } finally {
+            refreshing = false;
+        }
+    }
 
     async function uploadFiles(selected: File[]) {
         if (uploading || selected.length === 0) return;
@@ -159,8 +168,16 @@
     description="Inspect audio captures, trim recordings, and manage automatic cloud push."
 >
     <div class="space-y-4">
-        {#if audio.storageLocation}<p class="text-xs text-muted-foreground break-all">Recordings folder: <span class="text-foreground">{audio.storageLocation}</span></p>{/if}
-        {#if audio.cloudDriveLocation}<p class="text-xs text-muted-foreground break-all">Cloud folder: <span class="text-foreground">{audio.cloudDriveLocation}</span></p>{/if}
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-border/40">
+            <div class="space-y-0.5">
+                {#if audio.storageLocation}<p class="text-xs text-muted-foreground break-all">Recordings folder: <span class="text-foreground">{audio.storageLocation}</span></p>{/if}
+                {#if audio.cloudDriveLocation}<p class="text-xs text-muted-foreground break-all">Cloud folder: <span class="text-foreground">{audio.cloudDriveLocation}</span></p>{/if}
+            </div>
+            <Button size="sm" variant="outline" onclick={handleRefresh} disabled={refreshing} title="Refresh recording library">
+                <RotateCcw class="w-3.5 h-3.5 mr-1.5 {refreshing ? 'animate-spin' : ''}" />
+                {refreshing ? "Refreshing..." : "Refresh"}
+            </Button>
+        </div>
         
         <div role="region" aria-label="Import audio" class="rounded-lg border-2 border-dashed p-6 text-center transition-colors {dragging ? 'border-primary bg-primary/5' : 'border-border/80 bg-muted/15'}"
             ondragenter={(event) => { event.preventDefault(); dragging = true; }}

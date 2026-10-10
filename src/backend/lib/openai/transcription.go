@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"abel/src/backend/lib/audioengine/conversion"
+	"abel/src/backend/lib/audioengine/audio_processing"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
 	"abel/src/backend/lib/telemetry"
@@ -237,7 +237,7 @@ func (m *TranscriptionManager) downsample(chunk []float32) []byte {
 	if srcRate <= 0 {
 		srcRate = m.Config.SampleRate
 	}
-	return conversion.DownsampleStereoToMonoPCM24k(chunk, srcRate)
+	return audio_processing.DownsampleStereoToMonoPCM24k(chunk, srcRate)
 }
 
 func (m *TranscriptionManager) runSession(s *RealtimeSession) {

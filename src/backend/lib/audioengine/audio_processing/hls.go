@@ -23,7 +23,7 @@ var (
 	ErrHLSNotReady       = errors.New("HLS stream is not ready")
 	ErrInvalidStreamName = errors.New("invalid stream name")
 	hlsStreamNamePattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
-	hlsSegmentPattern    = regexp.MustCompile(`^segment-[0-9]+\\.ts$`)
+	hlsSegmentPattern    = regexp.MustCompile(`^segment-[0-9]+\.ts$`)
 )
 
 type hlsStream struct {
@@ -60,12 +60,24 @@ func NewHLSPublisher() (*HLSPublisher, error) {
 	return newHLSPublisher(ffmpegPath, root), nil
 }
 
+// NewHLSPublisherWithRoot initializes an HLSPublisher with specific ffmpeg and root path.
+func NewHLSPublisherWithRoot(ffmpegPath, root string) *HLSPublisher {
+	return newHLSPublisher(ffmpegPath, root)
+}
+
 func newHLSPublisher(ffmpegPath, root string) *HLSPublisher {
 	return &HLSPublisher{
 		root:       root,
 		ffmpegPath: ffmpegPath,
 		streams:    make(map[string]*hlsStream),
 	}
+}
+
+// Root returns the root working directory of the publisher.
+func (p *HLSPublisher) Root() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.root
 }
 
 // EnsureStream ensures an ffmpeg AAC/HLS encoder is actively running for the requested language.

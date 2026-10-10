@@ -3,7 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/base64"
-	"abel/src/backend/lib/audioengine/conversion"
+	"abel/src/backend/lib/audioengine/audio_processing"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -241,7 +241,7 @@ func (m *TranslationManager) downsample(chunk []float32) []byte {
 	if srcRate <= 0 {
 		srcRate = m.Config.SampleRate
 	}
-	return conversion.DownsampleStereoToMonoPCM24k(chunk, srcRate)
+	return audio_processing.DownsampleStereoToMonoPCM24k(chunk, srcRate)
 }
 
 // Reconnect policy for a translation session. A session is supervised for

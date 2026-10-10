@@ -50,7 +50,7 @@ func TestHLSPublisherProducesPlaylistAndMPEGTransportStream(t *testing.T) {
 
 	ffprobePath, err := exec.LookPath("ffprobe")
 	require.NoError(t, err)
-	probe := exec.Command(ffprobePath, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1", filepath.Join(publisher.root, "default", segmentName))
+	probe := exec.Command(ffprobePath, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1", filepath.Join(publisher.Root(), "default", segmentName))
 	codec, err := probe.Output()
 	require.NoError(t, err)
 	assert.Contains(t, string(codec), "aac")

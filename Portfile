@@ -6,6 +6,9 @@ PortGroup           github 1.0
 
 github.setup        SamuelMosesA Abel-Audio-Utils 2.1 v
 revision            0
+checksums           rmd160  REPLACE_WITH_REAL_RMD160 \
+                    sha256  REPLACE_WITH_REAL_SHA256 \
+                    size    REPLACE_WITH_REAL_SIZE
 categories          audio
 platforms           darwin
 license             MIT

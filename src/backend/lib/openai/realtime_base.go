@@ -86,18 +86,18 @@ type InputAudioAppendEvent struct {
 
 // RealtimeSession represents an active concurrent connection to OpenAI Realtime API.
 type RealtimeSession struct {
-	Language     string
-	AudioIn      chan []byte 
-	AudioOut     chan []float32
-	ctx          context.Context
-	cancel       context.CancelFunc
-	lastTokens   int64
+	Language   string
+	AudioIn    chan []byte
+	AudioOut   chan []float32
+	ctx        context.Context
+	cancel     context.CancelFunc
+	lastTokens int64
 }
 
 // OpenAIManager is a wrapper that delegates to separate Transcription and Translation managers
 type OpenAIManager struct {
 	Config           *config.Config
-	OriginalLanguage   string // Normalized code (e.g., "en")
+	OriginalLanguage string // Normalized code (e.g., "en")
 	Transcriber      *TranscriptionManager
 	Translator       *TranslationManager
 	Enabled          atomic.Bool
@@ -115,7 +115,7 @@ func (m *OpenAIManager) isOriginalLanguage(lang string) bool {
 func NewOpenAIManager(cfg *config.Config, appState *state.AppState, apiKey, translateModel, transcribeModel, voice, originalLang string) (*OpenAIManager, error) {
 	transcriber, _ := NewTranscriptionManager(cfg, appState, apiKey, transcribeModel, originalLang, 100, 1000, 100)
 	translator, _ := NewTranslationManager(cfg, appState, apiKey, translateModel, voice, originalLang, 100, 1000, 100)
-	
+
 	return &OpenAIManager{
 		Config:           cfg,
 		OriginalLanguage: originalLang,
@@ -169,13 +169,17 @@ func (m *OpenAIManager) GetChannel(language string) chan []float32 {
 	return m.Translator.GetChannel(language)
 }
 
-func (m *OpenAIManager) PushAudio(chunk []float32) {
+func (m *OpenAIManager) OnNewAudioChunk(chunk []float32) {
 	if !m.Enabled.Load() {
 		return
 	}
 	// Push to both - they handle their own language filtering
-	m.Transcriber.PushAudio(chunk)
-	m.Translator.PushAudio(chunk)
+	m.Transcriber.OnNewAudioChunk(chunk)
+	m.Translator.OnNewAudioChunk(chunk)
+}
+
+func (m *OpenAIManager) PushAudio(chunk []float32) {
+	m.OnNewAudioChunk(chunk)
 }
 
 func (m *OpenAIManager) GetListenerCount(language string) int {
@@ -223,8 +227,8 @@ func DecodeAudioDelta(delta64 string, targetRate int) ([]float32, error) {
 			val = src[idx0]*(1.0-float32(t)) + src[idx1]*float32(t)
 		}
 
-		floats[i*2] = val     // Left channel
-		floats[i*2+1] = val   // Right channel
+		floats[i*2] = val   // Left channel
+		floats[i*2+1] = val // Right channel
 	}
 
 	return floats, nil

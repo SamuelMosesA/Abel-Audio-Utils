@@ -183,6 +183,10 @@ func (m *TranslationManager) GetChannel(language string) chan []float32 {
 }
 
 func (m *TranslationManager) PushAudio(chunk []float32) {
+	m.OnNewAudioChunk(chunk)
+}
+
+func (m *TranslationManager) OnNewAudioChunk(chunk []float32) {
 	if !m.Enabled.Load() {
 		return
 	}

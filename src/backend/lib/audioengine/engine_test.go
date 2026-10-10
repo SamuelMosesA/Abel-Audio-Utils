@@ -43,7 +43,7 @@ func (m *MockStreamer) OpenStream(params pa.StreamParameters, args ...interface{
 
 func TestEngineAudioProcessing(t *testing.T) {
 	appState := state.NewAppState("", "")
-	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+	state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 		s.SetChL(0)
 		s.SetChR(1)
 		s.SetBoost(1.0)
@@ -131,7 +131,7 @@ func TestRestartEngineReconnectsByNameAndReloadsConfig(t *testing.T) {
 	}
 	cfg := &config.Config{BufferSize: 2, SampleRate: 44100, DefaultChL: 1, DefaultBoost: 1.0,
 		Credentials: map[string]string{"admin": "old"}, Path: writeConfig(t, "1.5", "new")}
-	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+	state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 		s.SetIsRunning(true)
 		s.SetDeviceID(1)
 		s.SetChL(1)
@@ -180,7 +180,7 @@ func TestRestartEngineStaysStoppedWhenDeviceMissing(t *testing.T) {
 	appState.Devices = []*pa.DeviceInfo{{Name: "Behringer UMC404HD", MaxInputChannels: 4}}
 	cfg := &config.Config{BufferSize: 2, SampleRate: 44100,
 		Credentials: map[string]string{"admin": "pw"}, Path: filepath.Join(t.TempDir(), "missing.yaml")}
-	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+	state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 		s.SetIsRunning(true)
 		s.SetDeviceID(0)
 		s.SetChL(3)

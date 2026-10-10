@@ -176,6 +176,10 @@ func (m *TranscriptionManager) GetChannel(language string) chan []float32 {
 }
 
 func (m *TranscriptionManager) PushAudio(chunk []float32) {
+	m.OnNewAudioChunk(chunk)
+}
+
+func (m *TranscriptionManager) OnNewAudioChunk(chunk []float32) {
 	if !m.Enabled.Load() {
 		return
 	}

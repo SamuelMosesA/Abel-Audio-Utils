@@ -2,8 +2,11 @@ package state
 
 import "strings"
 
-// InterfaceConfig holds audio interface channel selection, digital gain, and sample rate.
-type InterfaceConfig struct {
+// AudioEngineUIConfig holds audio interface channel selection, digital gain, and sample rate.
+// InterfaceConfig is an alias for AudioEngineUIConfig.
+type InterfaceConfig = AudioEngineUIConfig
+
+type AudioEngineUIConfig struct {
 	deviceID   int32
 	chL        int32
 	chR        int32
@@ -12,20 +15,20 @@ type InterfaceConfig struct {
 	sampleRate int32
 }
 
-func (c InterfaceConfig) DeviceID() int32   { return c.deviceID }
-func (c InterfaceConfig) ChL() int32        { return c.chL }
-func (c InterfaceConfig) ChR() int32        { return c.chR }
-func (c InterfaceConfig) Boost() float64    { return c.boost }
-func (c InterfaceConfig) IsRunning() bool   { return c.isRunning }
-func (c InterfaceConfig) SampleRate() int32 { return c.sampleRate }
+func (c AudioEngineUIConfig) DeviceID() int32   { return c.deviceID }
+func (c AudioEngineUIConfig) ChL() int32        { return c.chL }
+func (c AudioEngineUIConfig) ChR() int32        { return c.chR }
+func (c AudioEngineUIConfig) Boost() float64    { return c.boost }
+func (c AudioEngineUIConfig) IsRunning() bool   { return c.isRunning }
+func (c AudioEngineUIConfig) SampleRate() int32 { return c.sampleRate }
 
 // For internal use during updates
-func (c *InterfaceConfig) SetDeviceID(id int32)   { c.deviceID = id }
-func (c *InterfaceConfig) SetIsRunning(b bool)    { c.isRunning = b }
-func (c *InterfaceConfig) SetChL(ch int32)        { c.chL = ch }
-func (c *InterfaceConfig) SetChR(ch int32)        { c.chR = ch }
-func (c *InterfaceConfig) SetBoost(b float64)     { c.boost = b }
-func (c *InterfaceConfig) SetSampleRate(sr int32) { c.sampleRate = sr }
+func (c *AudioEngineUIConfig) SetDeviceID(id int32)   { c.deviceID = id }
+func (c *AudioEngineUIConfig) SetIsRunning(b bool)    { c.isRunning = b }
+func (c *AudioEngineUIConfig) SetChL(ch int32)        { c.chL = ch }
+func (c *AudioEngineUIConfig) SetChR(ch int32)        { c.chR = ch }
+func (c *AudioEngineUIConfig) SetBoost(b float64)     { c.boost = b }
+func (c *AudioEngineUIConfig) SetSampleRate(sr int32) { c.sampleRate = sr }
 
 type AIConfig struct {
 	Enabled          bool
@@ -69,6 +72,6 @@ func (c AIConfig) BlockedLanguages() map[string]bool {
 }
 
 type configState struct {
-	interfaceCfg InterfaceConfig
+	interfaceCfg AudioEngineUIConfig
 	aiCfg        AIConfig
 }

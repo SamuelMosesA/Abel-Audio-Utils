@@ -145,7 +145,7 @@ func TestTranslationSessionReconnectsAfterExpiry(t *testing.T) {
 	waitFor(t, func() bool { return fake.dials.Load() == 2 }, "rejected re-dial")
 	chunk := make([]float32, 960) // 10 ms of 48 kHz stereo
 	for i := 0; i < 5; i++ {
-		m.PushAudio(chunk)
+		m.OnNewAudioChunk(chunk)
 	}
 
 	<-replayConnReady
@@ -221,7 +221,7 @@ func TestTranslationAutoStartsForSubtitleSubscribers(t *testing.T) {
 	_, ok := m.Sessions.Load("it")
 	assert.False(t, ok, "no session before audio flows")
 
-	m.PushAudio(make([]float32, 960))
+	m.OnNewAudioChunk(make([]float32, 960))
 	waitFor(t, func() bool { _, ok := m.Sessions.Load("it"); return ok }, "auto-started session")
 	waitFor(t, func() bool { return fake.dials.Load() == 1 }, "dial")
 	m.StopSession("it", true)

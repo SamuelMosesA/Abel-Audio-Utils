@@ -78,7 +78,7 @@ func main() {
 
 	appState := state.NewAppState(cfg.StorageLocation, cfg.CloudDriveLocation)
 
-	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+	state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 		s.SetChL(int32(cfg.DefaultChL))
 		s.SetChR(int32(cfg.DefaultChR))
 		s.SetBoost(cfg.DefaultBoost)

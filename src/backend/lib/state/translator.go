@@ -9,7 +9,7 @@ type SessionInfo struct {
 type Translator interface {
 	GetChannel(language string) chan []float32
 	GetSubtitles(language string) (chan string, func())
-	PushAudio(chunk []float32)
+	OnNewAudioChunk(chunk []float32)
 	CloseAll()
 	ListSessions() []SessionInfo
 	StopSession(language string, subtitles bool)

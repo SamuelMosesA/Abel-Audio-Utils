@@ -61,7 +61,7 @@ func UpdateAudioConfig(appState *state.AppState, cfg *config.Config) gin.Handler
 			return
 		}
 
-		state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+		state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 			if req.DeviceID != nil {
 				err := audioengine.StartAudioEngine(nil, appState, cfg, *req.DeviceID, appState.RecordChan, appState.PlaybackChan)
 				if err != nil {

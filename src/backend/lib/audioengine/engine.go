@@ -78,7 +78,7 @@ func RestartEngine(streamer AudioStreamer, appState *state.AppState, cfg *config
 	}
 
 	if err := refreshDevices(appState); err != nil {
-		state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+		state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 			s.SetIsRunning(false)
 			s.SetDeviceID(-1)
 		})
@@ -107,7 +107,7 @@ func RestartEngine(streamer AudioStreamer, appState *state.AppState, cfg *config
 		}
 	}
 
-	state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+	state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 		s.SetIsRunning(result.DeviceID >= 0)
 		s.SetDeviceID(int32(result.DeviceID))
 		// Only overwrite live routing/gain when the file's defaults changed,
@@ -244,7 +244,7 @@ func startAudioEngineLocked(streamer AudioStreamer, appState *state.AppState, cf
 		}
 
 		// Update state with the actually opened sample rate!
-		state.Update[state.InterfaceConfig](appState, state.SectionInterface, func(s *state.InterfaceConfig) {
+		state.Update[state.AudioEngineUIConfig](appState, state.SectionInterface, func(s *state.AudioEngineUIConfig) {
 			s.SetSampleRate(int32(openedSampleRate))
 		})
 

@@ -45,9 +45,17 @@ Abel (anti-babel) is a high-performance, web-based audio recording, AI translati
 
 ### macOS Installation (MacPorts)
 
-Install dependencies via MacPorts:
+#### Option 1: Automated Installer (Recommended)
+Run the automated installation script, which installs all required dependencies via MacPorts, sets up Docker/Colima, compiles Abel, and enables Abel as an autostart background service on boot (`launchd`):
+
 ```bash
-sudo port install go nodejs20 npm10 pkgconfig ffmpeg portaudio
+./scripts/install-macports.sh
+```
+
+#### Option 2: Manual Installation
+Install all dependencies via MacPorts:
+```bash
+sudo port install go nodejs20 npm10 pkgconfig ffmpeg portaudio docker docker-compose-plugin colima
 ```
 
 Install Abel using the Portfile:

@@ -24,6 +24,11 @@ depends_build       port:go \
 depends_lib         path:bin/ffmpeg:ffmpeg \
                     port:portaudio
 
+depends_run         port:pkgconfig \
+                    port:docker \
+                    port:docker-compose-plugin \
+                    port:colima
+
 use_configure       no
 
 build {
@@ -70,7 +75,7 @@ notes "
 To configure Abel, edit:
   ${prefix}/etc/abel/config.yaml (or ~/.config/abel/config.yaml)
 
-To start the Abel service:
+To enable Abel and its Docker stack to start automatically whenever your Mac powers on:
   sudo port load abel
 
 To stop the service:

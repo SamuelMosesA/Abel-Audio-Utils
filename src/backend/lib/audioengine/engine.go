@@ -190,7 +190,17 @@ func startAudioEngineLocked(streamer AudioStreamer, appState *state.AppState, cf
 		var in []float32
 		var stream PortAudioStream
 		var err error
+
 		openedSampleRate := cfg.SampleRate
+		// For rate-constrained devices (e.g. 32000 Hz, 16000 Hz) or if no rate configured,
+		// directly adopt the device's native DefaultSampleRate to prevent ALSA driver assertion errors.
+		if openedSampleRate <= 0 || (dev.DefaultSampleRate > 0 && dev.DefaultSampleRate < 44100) {
+			if dev.DefaultSampleRate > 0 {
+				openedSampleRate = int(dev.DefaultSampleRate)
+			} else {
+				openedSampleRate = 44100
+			}
+		}
 		openedChannels := dev.MaxInputChannels
 
 		logger.Info("Opening stream",
@@ -199,17 +209,17 @@ func startAudioEngineLocked(streamer AudioStreamer, appState *state.AppState, cf
 			slog.Int("audio.sample_rate", openedSampleRate),
 		)
 
-		// Try 1: Configured sample rate and MaxInputChannels
+		// Try 1: Configured/native sample rate and MaxInputChannels
 		in = make([]float32, cfg.BufferSize*openedChannels)
 		stream, err = streamer.OpenStream(pa.StreamParameters{
 			Input:      pa.StreamDeviceParameters{Device: dev, Channels: openedChannels, Latency: dev.DefaultLowInputLatency},
 			SampleRate: float64(openedSampleRate), FramesPerBuffer: cfg.BufferSize,
 		}, in)
 
-		// Try 2: If configured sample rate failed, fallback directly to DefaultSampleRate of the device
+		// Try 2: If requested sample rate failed, fallback directly to DefaultSampleRate of the device
 		if err != nil {
 			logger.Warn("Failed to open stream at requested sample rate, falling back to device default",
-				slog.Int("audio.requested_rate", cfg.SampleRate),
+				slog.Int("audio.requested_rate", openedSampleRate),
 				slog.Float64("audio.default_rate", dev.DefaultSampleRate),
 				slog.Any("audio.error", err),
 			)

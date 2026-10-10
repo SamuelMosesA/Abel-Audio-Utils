@@ -269,6 +269,34 @@ func TestStopAudioEngineWithReadErrors(t *testing.T) {
 	assert.False(t, appState.Engine().IsRunning())
 }
 
+func TestStartAudioEngineAdoptsDeviceNativeDefaultRate(t *testing.T) {
+	appState := state.NewAppState("", "")
+	// Device only supports 32000 Hz native default sample rate
+	appState.Devices = []*pa.DeviceInfo{
+		{Name: "Voice Mic 32k", MaxInputChannels: 1, DefaultSampleRate: 32000},
+	}
+	// Config requests 48000 Hz
+	cfg := &config.Config{BufferSize: 256, SampleRate: 48000}
+
+	var openedRate float64
+	streamer := &MockStreamer{
+		OpenStreamFunc: func(params pa.StreamParameters, args ...interface{}) (PortAudioStream, error) {
+			openedRate = params.SampleRate
+			return &MockStream{}, nil
+		},
+	}
+
+	err := StartAudioEngine(streamer, appState, cfg, 0, nil, nil)
+	require.NoError(t, err)
+	defer func() { _ = StopAudioEngine(appState) }()
+
+	// Must directly adopt native 32000 Hz without failing on 48000 Hz
+	assert.Eventually(t, func() bool {
+		return appState.Config().SampleRate() == 32000
+	}, 1*time.Second, 10*time.Millisecond)
+	assert.Equal(t, float64(32000), openedRate)
+}
+
 type closeTrackingStream struct {
 	MockStream
 	closed *atomic.Bool

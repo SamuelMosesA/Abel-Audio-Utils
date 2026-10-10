@@ -2,6 +2,7 @@ package audio_processing
 
 import (
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -102,4 +103,55 @@ func TestLiveAudioBroadcaster_SlowListenerNonBlocking(t *testing.T) {
 			t.Fatalf("fast listener timed out; only received %d chunks", received)
 		}
 	}
+}
+
+func TestLiveAudioBroadcaster_UnsubscribeDuringStreamStop(t *testing.T) {
+	broadcaster, err := NewLiveAudioBroadcaster()
+	require.NoError(t, err)
+	defer broadcaster.Close()
+
+	sampleRate := 48000
+	const numListeners = 5
+
+	var channels []<-chan []byte
+	var unsubs []func()
+
+	for i := 0; i < numListeners; i++ {
+		ch, unsub, err := broadcaster.Subscribe("drain-test", sampleRate, nil)
+		require.NoError(t, err)
+		channels = append(channels, ch)
+		unsubs = append(unsubs, unsub)
+	}
+
+	// Publish one chunk so stream is active
+	chunk := generateStereoSineChunk(sampleRate, 100, 440)
+	_ = broadcaster.Publish("drain-test", sampleRate, chunk)
+
+	// Stop the stream directly from server side
+	broadcaster.stopStream("drain-test", nil)
+
+	// Drain all channels and call unsubs; none should panic with "close of closed channel"
+	var wg sync.WaitGroup
+	for i := 0; i < numListeners; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			ch := channels[idx]
+			unsub := unsubs[idx]
+
+			// Drain until closed
+			for range ch {
+			}
+
+			// Calling unsubscribe after stream stopped and closed channels must be safe
+			assert.NotPanics(t, func() {
+				unsub()
+			})
+			// Multiple calls must also be safe
+			assert.NotPanics(t, func() {
+				unsub()
+			})
+		}(i)
+	}
+	wg.Wait()
 }

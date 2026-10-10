@@ -216,9 +216,17 @@ func (b *LiveAudioBroadcaster) Subscribe(language string, sampleRate int, source
 	unsubscribe := func() {
 		once.Do(func() {
 			stream.mu.Lock()
-			delete(stream.listeners, ch)
+			_, exists := stream.listeners[ch]
+			if exists {
+				delete(stream.listeners, ch)
+			}
 			stream.mu.Unlock()
-			close(ch)
+
+			// Only close the channel if it was still in the listener map
+			// (prevents double-close panic if the stream runner already closed all listeners)
+			if exists {
+				close(ch)
+			}
 		})
 	}
 
@@ -290,13 +298,18 @@ func (b *LiveAudioBroadcaster) runStream(language string, stream *mp3Stream, cmd
 	wg.Wait()
 	close(stream.done)
 
-	// Clean up listeners
+	// Clean up listeners: collect and clear map under lock, then close once
 	stream.mu.Lock()
+	listenersToClose := make([]chan []byte, 0, len(stream.listeners))
 	for ch := range stream.listeners {
-		close(ch)
+		listenersToClose = append(listenersToClose, ch)
 	}
 	stream.listeners = make(map[chan []byte]struct{})
 	stream.mu.Unlock()
+
+	for _, ch := range listenersToClose {
+		close(ch)
+	}
 
 	b.mu.Lock()
 	if current, ok := b.streams[language]; ok && current == stream {

@@ -103,9 +103,7 @@ func main() {
 		state.Update[state.AIConfig](appState, state.SectionAI, func(s *state.AIConfig) {
 			s.SetEnabled(false)
 			for _, lang := range cfg.AILanguages {
-				if lang.Code != cfg.AIOriginalLanguage {
-					s.SetBlocked(lang.Code, true)
-				}
+				s.SetBlocked(lang.Code, true)
 			}
 		})
 		logger.Info("Translation manager ready", slog.String("provider", "openai"))

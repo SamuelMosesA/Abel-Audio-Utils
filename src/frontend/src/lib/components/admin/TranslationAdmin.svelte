@@ -38,7 +38,7 @@
         return ai.aiConfig.languages.map(l => ({
             code: l.code,
             name: l.name,
-            blocked: false,
+            blocked: true,
             active: false,
             listeners: 0
         }));

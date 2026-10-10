@@ -1,4 +1,4 @@
-# Feature Specification: UI Control Refinements, Persistent Per-Language AI Killswitch, and DSP Boost Utility Extraction
+# Feature Specification: UI Control Refinements, Per-Language AI Killswitch, and DSP Boost Utility Extraction
 
 **Feature Branch**: `005-ui-controls-and-dsp-refactor`
 
@@ -7,6 +7,12 @@
 **Status**: Draft
 
 **Input**: User description: "Remove the auto update loop for recordings. Put a refresh button there instead. For Ai translation controls, by default show a killswitch for each configured language. Put a refresh button there as well. It should tell me the number of clients on each translation thing. And the killswitch should persist and block for a specific language. THi sis n additoin to the master AI switch. How to make Embedded resource (file:///home/samuelmoses/Workspace/Church/Abel-Audio-Utils/src/backend/lib/audioengine/engine.go#L294:310): make the code like this into the audio uitilies function"
+
+## Clarifications
+
+### Session 2026-10-10
+
+- Q: How should the per-language AI killswitch state be stored? → A: Runtime stored in backend AppState, mirroring the current master AI switch.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -25,13 +31,13 @@ An administrator managing church sermon recordings in the web console needs the 
 
 ---
 
-### User Story 2 - Per-Language AI Killswitch with Active Client Metrics & Persistence (Priority: P1)
+### User Story 2 - Per-Language AI Killswitch with Active Client Metrics (Priority: P1)
 
 An administrator monitoring live translations needs granular control over each configured translation language. The AI Translation panel must display every configured language with:
 1. Its active client/listener count (real-time or on-demand).
 2. A dedicated killswitch toggle (Blocked vs Allowed/Active) for that specific language.
 3. A manual Refresh button to update translation status and client metrics.
-When a language is blocked via its killswitch, any ongoing translation session for that language is terminated, incoming translation requests for that language are rejected, and the blocked status persists across reloads and runs in addition to the master AI enable switch.
+When a language is blocked via its killswitch, any ongoing translation session for that language is terminated, incoming translation requests for that language are rejected, and the blocked status is maintained in runtime state in addition to the master AI enable switch.
 
 **Why this priority**: Church administrators need the ability to disable specific language models (e.g. if an AI output glitches, offends, or incurs runaway token costs for a specific dialect) while leaving other language streams operational, and to monitor how many congregation members are listening to each stream.
 
@@ -40,7 +46,7 @@ When a language is blocked via its killswitch, any ongoing translation session f
 **Acceptance Scenarios**:
 
 1. **Given** multiple languages configured in Abel (e.g., Spanish, French, German), **When** viewing the AI Translation panel, **Then** all configured languages are displayed with their individual killswitches and active client counts.
-2. **Given** an active translation session for a language, **When** an administrator toggles the killswitch to block that language, **Then** the active session for that language is stopped immediately, client access to that language's stream/subtitles is blocked, and the blocked state persists.
+2. **Given** an active translation session for a language, **When** an administrator toggles the killswitch to block that language, **Then** the active session for that language is stopped immediately, client access to that language's stream/subtitles is blocked, and the blocked state is maintained in runtime AppState.
 3. **Given** a language blocked via killswitch, **When** a listener requests subtitles or audio stream for that language, **Then** the system refuses the request with an unavailable notice.
 4. **Given** the master AI switch is enabled, **When** an administrator unblocks a previously blocked language, **Then** translation for that language is allowed to resume when requested.
 
@@ -65,7 +71,7 @@ A developer or audio engineer working on the backend audio pipeline needs common
 
 - **Recording Library refresh clicked while a recording upload or trim is active**: The refresh operation updates the library without interrupting or canceling the in-flight file upload or encoding job.
 - **Master AI switch disabled vs Per-language killswitch**: If Master AI is disabled, all translation sessions are paused/blocked regardless of individual language killswitch states. If Master AI is enabled, only languages not blocked by their individual killswitch are permitted to run.
-- **Language killswitch persistence across restarts**: The blocked languages set must be stored in runtime state and persisted (e.g., config / persistent state store) so server restarts preserve administrator restrictions.
+- **Language killswitch runtime state**: The blocked languages set is stored in runtime `AppState` (mirroring the master AI switch) and returned via `/api/ai/streams` status.
 - **Zero clients listening**: Languages with 0 active listeners should display `0 listeners` without errors or empty state crashes.
 - **Digital gain boost factor of 0.0 or negative**: The DSP utility function treats a boost factor of `<= 0.0` as `1.0` (unity gain) to prevent accidental total signal mute.
 
@@ -78,15 +84,15 @@ A developer or audio engineer working on the backend audio pipeline needs common
 - **FR-003**: The AI Translation Admin panel MUST include a manual Refresh button to re-fetch translation sessions, listener counts, and stream status on demand.
 - **FR-004**: The system MUST support individual per-language killswitches that can be toggled via the REST API (`POST /api/ai/streams`).
 - **FR-005**: When a language is killed/blocked, any active translation and subtitle session for that language MUST be immediately terminated, and subsequent client connection attempts for that language MUST be rejected with HTTP 503 or error response.
-- **FR-006**: The per-language blocked/killswitch status MUST persist across browser reloads and server restarts.
+- **FR-006**: The per-language blocked/killswitch status MUST be maintained in runtime backend `AppState` (mirroring the master AI switch) and persist across client browser refreshes.
 - **FR-007**: The system MUST report the number of active listeners/clients (both HLS audio listeners and subtitle subscribers) connected to each configured language.
-- **FR-008**: The backend MUST provide an exported function in `src/backend/lib/audioengine/conversion` (e.g. `ApplyGainAndClampStereo` or `ExtractStereoChunk`) that handles channel selection, digital boost amplification, and hard clamping to `[-1.0, 1.0]`.
+- **FR-008**: The backend MUST provide an exported function in `src/backend/lib/audioengine/conversion` (e.g. `ExtractStereoChunk` or `ApplyGainAndClampStereo`) that handles channel selection, digital boost amplification, and hard clamping to `[-1.0, 1.0]`.
 - **FR-009**: The capture loop in `src/backend/lib/audioengine/engine.go` MUST use the extracted DSP utility function instead of inline loop math.
 - **FR-010**: All unit tests in `src/backend/lib/audioengine/...`, `src/backend/lib/web/...`, and frontend tests (`bun run test:unit`) MUST pass with zero regressions.
 
 ### Key Entities *(include if feature involves data)*
 
-- **LanguageKillswitch**: Tracks the blocked/allowed state for each configured ISO/RFC language code, persisted in configuration/state.
+- **LanguageKillswitch**: Tracks the blocked/allowed state for each configured ISO/RFC language code in runtime `AppState`.
 - **LanguageSessionMetrics**: Reports the active translation session state, listener count (HLS audio clients and SSE subtitle subscribers), and killswitch status for each configured language.
 - **StereoChunk**: The interleaved `[]float32` stereo audio buffer with digital gain and hard-clamping applied.
 
@@ -97,7 +103,7 @@ A developer or audio engineer working on the backend audio pipeline needs common
 - **SC-001**: Zero automated background HTTP polling requests to `/api/recordings/library` when the recording tab is left open.
 - **SC-002**: 100% of configured languages appear in the AI Translation console with individual killswitch controls and client counts.
 - **SC-003**: Toggling a language killswitch immediately terminates that language's session and blocks new connections within 500ms.
-- **SC-004**: The blocked language state survives a full page refresh and server reboot without resetting.
+- **SC-004**: The blocked language state survives client page refreshes as long as the backend server runs.
 - **SC-005**: 100% of audio samples produced by the extracted DSP utility are bounded within `[-1.0, 1.0]`.
 - **SC-006**: 100% test pass rate across backend Go tests (`go test -race ./src/backend/...`) and frontend Vitest suite.
 
@@ -105,4 +111,4 @@ A developer or audio engineer working on the backend audio pipeline needs common
 
 - Configured languages are defined in `config.yaml` (`ai_languages`).
 - Client count for a language is measured by active SSE subtitle subscribers plus active HLS streaming requests for that language.
-- Persisting blocked languages can be saved into runtime state and serialized to the configuration file or persistent state file.
+- Per-language killswitch state is managed in backend runtime `AppState` identically to the master AI toggle.

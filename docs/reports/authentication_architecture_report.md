@@ -32,7 +32,7 @@ sequenceDiagram
     alt Invalid or Corrupted Cookie
         Sanitizer->>Sanitizer: securecookie.Decode() fails
         Sanitizer->>Sanitizer: Strip Cookie header from request
-        Sanitizer-->>User: Set-Cookie: abel_session=; Max-Age=-1
+        Sanitizer-->>User: Clear abel_session Cookie (Max-Age -1)
         Sanitizer->>GinSession: Forward sanitized request (no cookie)
         GinSession->>AuthMiddleware: Empty unauthenticated session
         AuthMiddleware-->>User: 401 Unauthorized (No logs / No errors)
@@ -51,7 +51,7 @@ sequenceDiagram
     Note over User,Backend: Phase 3: Explicit Logout & Revocation
     User->>Backend: DELETE /api/auth/session
     Backend->>AppState: RevokeSession(session_id)
-    Backend-->>User: 200 OK + Set-Cookie: abel_session=; Max-Age=-1
+    Backend-->>User: 200 OK + Clear abel_session Cookie
 ```
 
 ---

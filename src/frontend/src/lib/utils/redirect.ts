@@ -6,8 +6,22 @@ export function resolveRedirect(target: string | null | undefined, fallback = "/
         return fallback;
     }
     const trimmed = target.trim();
-    if (trimmed.startsWith("/") && !trimmed.startsWith("//") && !trimmed.startsWith("/\\")) {
-        return trimmed;
+    if (
+        trimmed.startsWith("/") &&
+        !trimmed.startsWith("//") &&
+        !trimmed.startsWith("/\\") &&
+        !trimmed.startsWith("/\t") &&
+        !trimmed.startsWith("/\r") &&
+        !trimmed.startsWith("/\n")
+    ) {
+        try {
+            const parsed = new URL(trimmed, "http://localhost");
+            if (parsed.origin === "http://localhost" && parsed.pathname.startsWith("/")) {
+                return parsed.pathname + parsed.search + parsed.hash;
+            }
+        } catch {
+            return fallback;
+        }
     }
     return fallback;
 }

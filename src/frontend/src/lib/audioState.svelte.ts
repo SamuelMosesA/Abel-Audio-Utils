@@ -39,7 +39,7 @@ export interface AppStatus {
     ssid: string;
 }
 
-import { fetchWithSync } from "./utils/api";
+import { fetchWithSync, setUnauthorizedHandler } from "./utils/api";
 
 export class AudioStore {
     isRunning = $state(false);
@@ -217,12 +217,63 @@ export class SystemStore {
     constructor(private ui: UIStore, private audio: AudioStore, private ai: AIStore, private files?: FileStore) {
         if (typeof window !== 'undefined' && window.localStorage) {
             this.sessionId = localStorage.getItem("session_id") || "";
-            this.isAuthenticated = !!this.sessionId;
-            
-            if (this.isAuthenticated && window.location.protocol.startsWith('http')) {
-                this.setupSSE();
-                this.syncConnection();
+            this.isAuthenticated = false;
+        }
+
+        setUnauthorizedHandler(() => {
+            this.clearSession();
+            if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+                const target = window.location.pathname + window.location.search;
+                window.location.href = `/login?redirect=${encodeURIComponent(target)}&reason=expired`;
             }
+        });
+    }
+
+    async validateSession(): Promise<boolean> {
+        try {
+            const res = await fetch("/api/auth/session", { credentials: "include" });
+            if (res.ok) {
+                const data = await res.json();
+                this.setAuthenticated(data.session || "", data.username);
+                return true;
+            } else {
+                this.clearSession();
+                return false;
+            }
+        } catch (e) {
+            console.error("Error validating session", e);
+            return false;
+        }
+    }
+
+    setAuthenticated(sessionId: string, username?: string) {
+        this.sessionId = sessionId;
+        this.isAuthenticated = true;
+        if (typeof window !== 'undefined' && window.localStorage) {
+            if (sessionId) localStorage.setItem("session_id", sessionId);
+            if (username) localStorage.setItem("admin_user", username);
+        }
+        if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+            this.setupSSE();
+            this.syncConnection();
+        }
+    }
+
+    clearSession() {
+        this.isAuthenticated = false;
+        this.sessionId = "";
+        if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.removeItem("session_id");
+            localStorage.removeItem("admin_user");
+        }
+        if (this.#ws) {
+            this.#ws.close();
+            this.#ws = null;
+        }
+        this.wsConnected = false;
+        if (this.#sse) {
+            this.#sse.close();
+            this.#sse = null;
         }
     }
 
@@ -310,18 +361,7 @@ export class SystemStore {
 
             if (res.ok) {
                 const data = await res.json();
-                if (typeof window !== 'undefined' && window.localStorage) {
-                    localStorage.setItem("admin_user", username);
-                }
-                if (data.session) {
-                    this.sessionId = data.session;
-                    if (typeof window !== 'undefined' && window.localStorage) {
-                        localStorage.setItem("session_id", data.session);
-                    }
-                }
-                this.isAuthenticated = true;
-                this.setupSSE();
-                this.syncConnection();
+                this.setAuthenticated(data.session || "", username);
                 return true;
             }
             return false;
@@ -341,15 +381,8 @@ export class SystemStore {
         } catch (e) {
             console.error("Logout request error:", e);
         }
-        if (typeof window !== 'undefined' && window.localStorage) {
-            localStorage.removeItem("admin_user");
-            localStorage.removeItem("session_id");
-        }
-        this.isAuthenticated = false;
-        this.sessionId = "";
+        this.clearSession();
         this.ui.currentView = "landing";
-        if (this.#ws) { this.#ws.close(); this.#ws = null; }
-        if (this.#sse) { this.#sse.close(); this.#sse = null; }
     }
 }
 

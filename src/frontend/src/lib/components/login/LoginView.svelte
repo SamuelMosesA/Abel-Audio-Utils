@@ -54,6 +54,12 @@
         description="Enter credentials to configure audio devices and processing."
     >
         <div class="space-y-4">
+            {#if page.url.searchParams.get("reason") === "expired"}
+                <div class="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-md text-amber-400 text-sm font-medium">
+                    <AlertCircle class="w-4 h-4 shrink-0" />
+                    <span>Your session has expired. Please log in again.</span>
+                </div>
+            {/if}
             {#if error}
                 <div class="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm font-medium">
                     <AlertCircle class="w-4 h-4 shrink-0" />

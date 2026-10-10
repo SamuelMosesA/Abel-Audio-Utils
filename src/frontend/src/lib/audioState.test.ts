@@ -90,6 +90,56 @@ describe('Modular Stores', () => {
             expect(system.sessionId).toBe("");
         });
 
+        it("should validate active session with GET /api/auth/session", async () => {
+            const ui = new UIStore();
+            const audio = new AudioStore();
+            const ai = new AIStore(ui);
+            const system = new SystemStore(ui, audio, ai);
+
+            (fetch as any).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ status: "authenticated", session: "validated-token", username: "admin" })
+            });
+
+            const isValid = await system.validateSession();
+
+            expect(isValid).toBe(true);
+            expect(system.isAuthenticated).toBe(true);
+            expect(system.sessionId).toBe("validated-token");
+        });
+
+        it("should clear session and return false when session check fails", async () => {
+            const ui = new UIStore();
+            const audio = new AudioStore();
+            const ai = new AIStore(ui);
+            const system = new SystemStore(ui, audio, ai);
+            system.isAuthenticated = true;
+            system.sessionId = "old-stale-token";
+
+            (fetch as any).mockResolvedValueOnce({
+                ok: false,
+                status: 401,
+                json: async () => ({ error: "Unauthorized session" })
+            });
+
+            const isValid = await system.validateSession();
+
+            expect(isValid).toBe(false);
+            expect(system.isAuthenticated).toBe(false);
+            expect(system.sessionId).toBe("");
+        });
+
+        it("should not assume authentication on load even if localStorage has token", () => {
+            localStorage.setItem("session_id", "some-stored-token");
+            const ui = new UIStore();
+            const audio = new AudioStore();
+            const ai = new AIStore(ui);
+            const system = new SystemStore(ui, audio, ai);
+
+            expect(system.isAuthenticated).toBe(false);
+            expect(system.sessionId).toBe("some-stored-token");
+        });
+
         it('should trigger files.fetchFiles and audio.sync on recording section update', async () => {
             const ui = new UIStore();
             const audio = new AudioStore();

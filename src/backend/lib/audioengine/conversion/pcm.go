@@ -4,7 +4,7 @@ import "encoding/binary"
 
 const (
 	// DefaultWavSampleRate is the fallback standard audio sampling rate in Hz.
-	DefaultWavSampleRate = 48000
+	DefaultWavSampleRate = 44100
 	// OpenAIRate is the target sampling rate for OpenAI Realtime audio.
 	OpenAIRate = 24000
 
@@ -18,23 +18,14 @@ const (
 func Float32ToPCM16(chunk []float32) []byte {
 	pcm := make([]byte, len(chunk)*2)
 	for i, sample := range chunk {
-		if sample > 1.0 {
-			sample = 1.0
-		} else if sample < -1.0 {
-			sample = -1.0
+		val := sample
+		if val > 1.0 {
+			val = 1.0
+		} else if val < -1.0 {
+			val = -1.0
 		}
-		binary.LittleEndian.PutUint16(pcm[i*2:], uint16(int16(sample*32767)))
+		raw := int16(val * 32767.0)
+		binary.LittleEndian.PutUint16(pcm[i*2:(i+1)*2], uint16(raw))
 	}
 	return pcm
-}
-
-// PCM16ToFloat32 converts signed 16-bit little-endian PCM bytes into normalized float32 samples.
-func PCM16ToFloat32(data []byte) []float32 {
-	numSamples := len(data) / 2
-	floats := make([]float32, numSamples)
-	for i := 0; i < numSamples; i++ {
-		s := int16(binary.LittleEndian.Uint16(data[i*2 : (i+1)*2]))
-		floats[i] = float32(s) / 32767.0
-	}
-	return floats
 }

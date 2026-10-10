@@ -65,3 +65,42 @@ admin_user_credentials: "./my_creds.json"
 	assert.Equal(t, 48000, cfg.SampleRate)
 	assert.Equal(t, "admin", cfg.Credentials["admin"])
 }
+
+func TestResolveSessionSecret(t *testing.T) {
+	t.Run("Config Override", func(t *testing.T) {
+		cfg := &Config{SessionSecret: "explicit-secret-key-12345"}
+		secret, err := ResolveSessionSecret(cfg)
+		require.NoError(t, err)
+		assert.Equal(t, []byte("explicit-secret-key-12345"), secret)
+	})
+
+	t.Run("Dynamic Generation and Persistence with 0600 permissions", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config.yaml")
+		cfg := &Config{Path: cfgPath}
+
+		keyPath := filepath.Join(tmpDir, "session.key")
+		assert.NoFileExists(t, keyPath)
+
+		// First call: generates and writes session.key
+		secret1, err := ResolveSessionSecret(cfg)
+		require.NoError(t, err)
+		assert.Len(t, secret1, 32)
+		assert.FileExists(t, keyPath)
+
+		info, err := os.Stat(keyPath)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+
+		// Second call: loads exact same key (persists across restarts)
+		secret2, err := ResolveSessionSecret(cfg)
+		require.NoError(t, err)
+		assert.Equal(t, secret1, secret2)
+	})
+
+	t.Run("Nil config fallback", func(t *testing.T) {
+		secret, err := ResolveSessionSecret(nil)
+		require.NoError(t, err)
+		assert.Len(t, secret, 32)
+	})
+}

@@ -50,7 +50,11 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 		MaxAge:           12 * time.Hour,
 	}))
 
-	store := cookie.NewStore([]byte("secret"))
+	sessionSecret, err := config.ResolveSessionSecret(cfg)
+	if err != nil {
+		fmt.Printf("[Auth] Warning: error resolving persistent session secret: %v\n", err)
+	}
+	store := cookie.NewStore(sessionSecret)
 	store.Options(sessions.Options{
 		Path:     "/",
 		MaxAge:   86400 * 7, // 7 days

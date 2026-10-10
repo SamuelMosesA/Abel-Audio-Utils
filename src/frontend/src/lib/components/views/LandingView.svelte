@@ -150,7 +150,7 @@
           </div>
 
           <LiveAudioPlayer
-            src="/api/audio/hls/default/index.m3u8"
+            src="/api/audio/stream"
             label="Original live audio"
           />
         </div>

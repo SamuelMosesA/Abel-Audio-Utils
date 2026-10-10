@@ -20,7 +20,7 @@ import (
 )
 
 // NewRouter constructs the Gin HTTP engine with authenticated admin routes and public endpoints.
-func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio_processing.HLSPublisher, staticFiles embed.FS) *gin.Engine {
+func NewRouter(appState *state.AppState, cfg *config.Config, broadcaster *audio_processing.LiveAudioBroadcaster, staticFiles embed.FS) *gin.Engine {
 	processor := recording.NewRecordingProcessor(cfg)
 	if appState != nil {
 		processor.SetOnUpdate(func() {
@@ -123,10 +123,8 @@ func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audio
 		{
 			audio.GET("/devices", DevicesHandler(appState))
 			audio.GET("/config", GetAudioConfig(appState))
-			audio.GET("/stream", StreamHandler())
-			audio.GET("/stream/*lang", StreamHandler())
-			audio.GET("/hls/:lang/index.m3u8", HLSPlaylistHandler(appState, cfg, hlsPublisher))
-			audio.GET("/hls/:lang/:segment", HLSSegmentHandler(hlsPublisher))
+			audio.GET("/stream", StreamHandler(appState, cfg, broadcaster))
+			audio.GET("/stream/*lang", StreamHandler(appState, cfg, broadcaster))
 		}
 
 		// Recordings

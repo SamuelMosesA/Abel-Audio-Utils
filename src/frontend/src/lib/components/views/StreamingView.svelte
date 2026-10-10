@@ -47,7 +47,7 @@
         isProcessingQueue = false;
     }
 
-    let audioSource = $derived(`/api/audio/hls/${lang}/index.m3u8`);
+    let audioSource = $derived(`/api/audio/stream/${lang}`);
     
     let eventSource: EventSource | null = null;
     let scrollContainerRef = $state<HTMLElement | null>(null);

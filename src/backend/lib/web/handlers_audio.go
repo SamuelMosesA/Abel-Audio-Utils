@@ -2,18 +2,13 @@ package web
 
 import (
 	"abel/src/backend/lib/audioengine"
-	"abel/src/backend/lib/audioengine/audio_processing"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
-	"context"
-	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -30,33 +25,30 @@ func DevicesHandler(state *state.AppState) gin.HandlerFunc {
 	}
 }
 
-// @Summary Update audio config
-// @Description Boots up the device engine or updates running config
+type UpdateAudioConfigRequest struct {
+	DeviceID *int     `json:"deviceID"`
+	ChL      *int     `json:"chL"`
+	ChR      *int     `json:"chR"`
+	Boost    *float64 `json:"boost"`
+}
+
+// @Summary Update audio configuration
+// @Description Updates active audio input device, channel mapping, or boost
 // @Tags Audio
 // @Accept json
 // @Produce json
-// @Param request body object true "Interface Config"
-// @Success 200 {object} string "Success"
-// @Failure 400 {object} string "Invalid Request"
+// @Param body body UpdateAudioConfigRequest true "Audio configuration updates"
+// @Success 200 {object} object "Interface updated"
+// @Failure 400 {object} string "Invalid request body"
 // @Failure 401 {object} string "Unauthorized"
 // @Failure 500 {object} string "Internal Error"
 // @Security CookieAuth
 // @Security BasicAuth
 // @Router /api/audio/config [patch]
 func UpdateAudioConfig(appState *state.AppState, cfg *config.Config) gin.HandlerFunc {
-	logger := slog.With("component", "engine")
+	logger := slog.With("component", "api")
 	return func(c *gin.Context) {
-		if appState.IsRecording() {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot change configuration while recording"})
-			return
-		}
-
-		var req struct {
-			DeviceID *int     `json:"deviceID"`
-			ChL      *int     `json:"chL"`
-			ChR      *int     `json:"chR"`
-			Boost    *float64 `json:"boost"`
-		}
+		var req UpdateAudioConfigRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 			return
@@ -159,55 +151,50 @@ func GetAudioConfig(appState *state.AppState) gin.HandlerFunc {
 	}
 }
 
-type HLSProvider interface {
-	EnsureStream(language string, sampleRate int, source <-chan []float32) error
-	WaitForPlaylist(ctx context.Context, language string, timeout time.Duration) ([]byte, error)
-	ReadSegment(language, name string) ([]byte, error)
+// AudioStreamBroadcaster defines the interface for subscribing to real-time progressive audio streams.
+type AudioStreamBroadcaster interface {
+	Subscribe(language string, sampleRate int, source <-chan []float32) (<-chan []byte, func(), error)
 }
 
 func streamLanguage(path string) string {
-	language := filepath.Base(path)
-	if language == "stream" || language == "." || language == "/" || language == "" {
+	clean := strings.TrimPrefix(path, "/")
+	clean = strings.TrimSpace(clean)
+	if clean == "" || clean == "." || clean == "stream" {
 		return "default"
 	}
-	return language
+	return filepath.Base(clean)
 }
 
-func StreamHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		language := streamLanguage(c.Param("lang"))
-		target := "/api/audio/hls/" + url.PathEscape(language) + "/index.m3u8"
-		c.Redirect(http.StatusTemporaryRedirect, target)
-	}
-}
-
-func HLSPlaylistHandler(appState *state.AppState, cfg *config.Config, publisher HLSProvider) gin.HandlerFunc {
-	logger := slog.With("component", "hls")
+// StreamHandler streams live captured or translated audio as progressive chunked MP3 frames.
+func StreamHandler(appState *state.AppState, cfg *config.Config, broadcaster AudioStreamBroadcaster) gin.HandlerFunc {
+	logger := slog.With("component", "audio_stream")
 	return func(c *gin.Context) {
 		language := streamLanguage(c.Param("lang"))
 		sampleRate := int(appState.Config().SampleRate())
 		if sampleRate <= 0 {
 			sampleRate = cfg.SampleRate
 		}
+		if sampleRate <= 0 {
+			sampleRate = 48000
+		}
 
 		if language != "default" {
 			resolved := cfg.ResolveLanguageName(language)
 			if appState.IsLanguageBlocked(language) || appState.IsLanguageBlocked(resolved) {
-				logger.Warn("HLS stream requested for blocked language", slog.String("stream.language", language))
+				logger.Warn("Audio stream requested for blocked language", slog.String("stream.language", language))
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "translation audio is blocked"})
 				return
 			}
-		}
-
-		if language != "default" && appState.Translator == nil {
-			c.Redirect(http.StatusTemporaryRedirect, "/api/audio/hls/default/index.m3u8")
-			return
 		}
 
 		var source <-chan []float32
 		if language == "default" {
 			source = appState.PlaybackChan
 		} else {
+			if appState.Translator == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "translation audio is unavailable"})
+				return
+			}
 			source = appState.Translator.GetChannel(language)
 			if source == nil {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "translation audio is unavailable"})
@@ -215,38 +202,39 @@ func HLSPlaylistHandler(appState *state.AppState, cfg *config.Config, publisher 
 			}
 		}
 
-		if err := publisher.EnsureStream(language, sampleRate, source); err != nil {
-			logger.Error("Failed to start HLS stream", slog.String("stream.language", language), slog.Any("error", err))
+		if broadcaster == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "audio streaming is disabled"})
+			return
+		}
+
+		ch, unsubscribe, err := broadcaster.Subscribe(language, sampleRate, source)
+		if err != nil {
+			logger.Error("Failed to subscribe to audio stream", slog.String("stream.language", language), slog.Any("error", err))
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "audio stream is unavailable"})
 			return
 		}
+		defer unsubscribe()
 
-		playlist, err := publisher.WaitForPlaylist(c.Request.Context(), language, 8*time.Second)
-		if err != nil {
-			logger.Warn("HLS playlist not ready", slog.String("stream.language", language), slog.Any("error", err))
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "audio stream is not ready"})
-			return
-		}
-
-		c.Header("Cache-Control", "no-store")
+		c.Header("Content-Type", "audio/mpeg")
+		c.Header("Transfer-Encoding", "chunked")
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Connection", "keep-alive")
 		c.Header("X-Accel-Buffering", "no")
-		c.Data(http.StatusOK, "application/vnd.apple.mpegurl", playlist)
-	}
-}
+		c.Status(http.StatusOK)
 
-// HLSSegmentHandler serves live .ts audio segments generated by FFmpeg.
-func HLSSegmentHandler(publisher HLSProvider) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		data, err := publisher.ReadSegment(c.Param("lang"), c.Param("segment"))
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) || errors.Is(err, audio_processing.ErrHLSNotReady) {
-				c.Status(http.StatusNotFound)
+		for {
+			select {
+			case <-c.Request.Context().Done():
 				return
+			case chunk, ok := <-ch:
+				if !ok {
+					return
+				}
+				if _, err := c.Writer.Write(chunk); err != nil {
+					return
+				}
+				c.Writer.Flush()
 			}
-			c.Status(http.StatusBadRequest)
-			return
 		}
-		c.Header("Cache-Control", "public, max-age=30, immutable")
-		c.Data(http.StatusOK, "video/mp2t", data)
 	}
 }

@@ -49,7 +49,7 @@ func setupTestRouterWithProcessor(stateObj *state.AppState, cfg *config.Config, 
 		api.GET("/ai/streams", GetAIStreamsStatus(stateObj, cfg))
 		api.GET("/system/connection", GetSystemConnection(cfg))
 	}
-	r.GET("/stream", StreamHandler())
+	r.GET("/stream", StreamHandler(stateObj, cfg, nil))
 	r.GET("/subtitles/:lang", SubtitlesHandler(stateObj, cfg))
 	r.GET("/ws", NewWSHandler(stateObj, cfg))
 

@@ -88,7 +88,7 @@
             <div class="space-y-2">
                 <div class="flex items-center justify-between px-1 text-xs font-medium text-muted-foreground">
                     <span>Configured Languages & Feeds</span>
-                    <span>Killswitch</span>
+                    <span>Kill</span>
                 </div>
                 {#each displayLanguages as lang (lang.code)}
                     <div class="flex items-center justify-between p-3 border rounded-lg transition-colors {lang.blocked ? 'bg-destructive/5 border-destructive/30' : 'bg-muted/15 border-border'}">
@@ -121,12 +121,12 @@
                             size="sm"
                             class="text-xs"
                             onclick={() => toggleKillswitch(lang.code, lang.blocked)}
-                            title={lang.blocked ? "Unblock language translation" : "Killswitch: block language translation"}
+                            title={lang.blocked ? "Unblock language translation" : "Kill: block language translation"}
                         >
                             {#if lang.blocked}
                                 Unblock
                             {:else}
-                                <Ban class="w-3.5 h-3.5 mr-1" /> Killswitch
+                                <Ban class="w-3.5 h-3.5 mr-1" /> Kill
                             {/if}
                         </Button>
                     </div>

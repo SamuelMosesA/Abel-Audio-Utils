@@ -48,13 +48,13 @@ func StopAudioEngine(appState *state.AppState) error {
 	if done != nil {
 		select {
 		case <-done:
-		case <-time.After(2 * time.Second):
+		case <-time.After(3 * time.Second):
 			slog.Warn("Audio engine did not terminate within timeout")
 		}
 		appState.DoneAudio = nil
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(3 * time.Second)
 	for appState.Engine().IsRunning() {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("audio engine did not stop in time")
@@ -249,8 +249,10 @@ func startAudioEngineLocked(streamer AudioStreamer, appState *state.AppState, cf
 		})
 
 		stream.Start()
-		defer stream.Stop()
-		defer stream.Close()
+		defer func() {
+			_ = stream.Stop()
+			_ = stream.Close()
+		}()
 
 		for {
 			select {

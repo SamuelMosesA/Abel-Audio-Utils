@@ -161,7 +161,7 @@ func TestTranslationSessionReconnectsAfterExpiry(t *testing.T) {
 	// Same session object, still registered; channel handed out earlier is still the live one.
 	v, ok := m.Sessions.Load("fr")
 	require.True(t, ok, "session must survive the reconnect")
-	assert.Equal(t, audioOut, v.(*RealtimeSession).AudioOut)
+	assert.Equal(t, audioOut, v.AudioOut)
 	assert.Equal(t, int32(3), fake.dials.Load())
 
 	m.StopSession("fr", true)

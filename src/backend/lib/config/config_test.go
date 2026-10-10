@@ -74,19 +74,25 @@ func TestResolveSessionSecret(t *testing.T) {
 		assert.Equal(t, []byte("explicit-secret-key-12345"), secret)
 	})
 
-	t.Run("Key Persistence Across Server Runs", func(t *testing.T) {
-		tempDir := t.TempDir()
-		cfg := &Config{Path: filepath.Join(tempDir, "config.yaml")}
+	t.Run("Dynamic Generation and Persistence with 0600 permissions", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config.yaml")
+		cfg := &Config{Path: cfgPath}
 
-		// First run generates and writes session.key
+		keyPath := filepath.Join(tmpDir, "session.key")
+		assert.NoFileExists(t, keyPath)
+
+		// First call: generates and writes session.key
 		secret1, err := ResolveSessionSecret(cfg)
 		require.NoError(t, err)
 		assert.Len(t, secret1, 32)
+		assert.FileExists(t, keyPath)
 
-		keyFile := filepath.Join(tempDir, "session.key")
-		assert.FileExists(t, keyFile)
+		info, err := os.Stat(keyPath)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 
-		// Subsequent run reads existing session.key, ensuring browser cookies remain valid across restarts
+		// Second call: loads exact same key (persists across restarts)
 		secret2, err := ResolveSessionSecret(cfg)
 		require.NoError(t, err)
 		assert.Len(t, secret2, 32)

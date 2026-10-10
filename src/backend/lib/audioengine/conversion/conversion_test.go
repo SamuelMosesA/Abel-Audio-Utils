@@ -58,3 +58,42 @@ func TestWavHeaderGeneration(t *testing.T) {
 	assert.Equal(t, "fmt ", string(buf.Bytes()[12:16]))
 	assert.Equal(t, "data", string(buf.Bytes()[36:40]))
 }
+
+func TestExtractStereoChunk(t *testing.T) {
+	t.Run("normal extraction and gain scaling", func(t *testing.T) {
+		in := []float32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8}
+		out := conversion.ExtractStereoChunk(in, 2, 4, 1, 2, 2.0)
+		require.Len(t, out, 4)
+		assert.InDelta(t, float32(0.4), out[0], 1e-6)
+		assert.InDelta(t, float32(0.6), out[1], 1e-6)
+		assert.InDelta(t, float32(1.0), out[2], 1e-6)
+		assert.InDelta(t, float32(1.0), out[3], 1e-6)
+	})
+
+	t.Run("clamping negative values", func(t *testing.T) {
+		in := []float32{-0.8, -0.9}
+		out := conversion.ExtractStereoChunk(in, 1, 2, 0, 1, 2.0)
+		require.Len(t, out, 2)
+		assert.Equal(t, float32(-1.0), out[0])
+		assert.Equal(t, float32(-1.0), out[1])
+	})
+
+	t.Run("non-positive boost defaults to unity gain", func(t *testing.T) {
+		in := []float32{0.3, 0.4}
+		outZero := conversion.ExtractStereoChunk(in, 1, 2, 0, 1, 0.0)
+		assert.InDelta(t, float32(0.3), outZero[0], 1e-6)
+		assert.InDelta(t, float32(0.4), outZero[1], 1e-6)
+
+		outNeg := conversion.ExtractStereoChunk(in, 1, 2, 0, 1, -2.5)
+		assert.InDelta(t, float32(0.3), outNeg[0], 1e-6)
+		assert.InDelta(t, float32(0.4), outNeg[1], 1e-6)
+	})
+
+	t.Run("out of bounds channel indices safely yield zero", func(t *testing.T) {
+		in := []float32{0.5}
+		out := conversion.ExtractStereoChunk(in, 1, 2, 5, -1, 1.0)
+		require.Len(t, out, 2)
+		assert.Equal(t, float32(0.0), out[0])
+		assert.Equal(t, float32(0.0), out[1])
+	})
+}

@@ -1,6 +1,7 @@
 package audioengine
 
 import (
+	"abel/src/backend/lib/audioengine/conversion"
 	"abel/src/backend/lib/config"
 	"abel/src/backend/lib/state"
 	"abel/src/backend/lib/telemetry"
@@ -275,39 +276,7 @@ func startAudioEngineLocked(streamer AudioStreamer, appState *state.AppState, cf
 			chR := int(conf.ChR())
 			boost := float32(conf.Boost())
 
-			if boost == 0 {
-				boost = 1.0
-			}
-
-			stereoChunk := make([]float32, cfg.BufferSize*2)
-			for i := 0; i < cfg.BufferSize; i++ {
-				idxL := (i * openedChannels) + chL
-				idxR := (i * openedChannels) + chR
-
-				var sL, sR float32
-				if idxL < len(in) {
-					sL = in[idxL]
-				}
-				if idxR < len(in) {
-					sR = in[idxR]
-				}
-
-				sL *= boost
-				sR *= boost
-				if sL > 1.0 {
-					sL = 1.0
-				} else if sL < -1.0 {
-					sL = -1.0
-				}
-				if sR > 1.0 {
-					sR = 1.0
-				} else if sR < -1.0 {
-					sR = -1.0
-				}
-
-				stereoChunk[i*2] = sL
-				stereoChunk[i*2+1] = sR
-			}
+			stereoChunk := conversion.ExtractStereoChunk(in, cfg.BufferSize, openedChannels, chL, chR, boost)
 
 			// Fan-out to consumers
 			select {

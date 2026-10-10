@@ -119,6 +119,22 @@ func TestRestartAudioEngineRefusedWhileRecording(t *testing.T) {
 	assert.True(t, appState.IsRecording(), "recording must be untouched")
 }
 
+func TestRestartAudioEngineRejectsConcurrentInFlightRequests(t *testing.T) {
+	appState := state.NewAppState("", "")
+	router := setupTestRouter(appState, &config.Config{})
+
+	restartingAudio.Store(true)
+	defer restartingAudio.Store(false)
+
+	req, _ := http.NewRequest(http.MethodPost, "/api/audio/restart", nil)
+	req.Header.Set("X-Test-Auth", "true")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "already in progress")
+}
+
 func TestUpdateAudioConfigInvalidDeviceDoesNotPanic(t *testing.T) {
 	appState := state.NewAppState("", "")
 	router := setupTestRouter(appState, &config.Config{})

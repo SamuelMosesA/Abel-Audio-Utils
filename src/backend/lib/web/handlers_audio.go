@@ -11,10 +11,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+var restartingAudio atomic.Bool
 
 func DevicesHandler(state *state.AppState) gin.HandlerFunc {
 	logger := slog.With("component", "api")
@@ -90,12 +93,12 @@ func UpdateAudioConfig(appState *state.AppState, cfg *config.Config) gin.Handler
 }
 
 // @Summary Restart audio engine
-// @Description Re-scans audio devices so hardware connected after startup appears, reloads config.yaml and the credentials file, and reconnects to the previous device by name. Refused while recording.
+// @Description Re-scans audio devices so hardware connected after startup appears, reloads config.yaml and the credentials file, and reconnects to the previous device by name. Refused while recording or while a restart is in progress.
 // @Tags Audio
 // @Produce json
 // @Success 200 {object} audioengine.RestartResult
 // @Failure 401 {object} string "Unauthorized"
-// @Failure 409 {object} string "Recording in progress"
+// @Failure 409 {object} string "Recording or restart in progress"
 // @Failure 500 {object} string "Internal Error"
 // @Security CookieAuth
 // @Security BasicAuth
@@ -107,6 +110,12 @@ func RestartAudioEngine(appState *state.AppState, cfg *config.Config) gin.Handle
 			c.JSON(http.StatusConflict, gin.H{"error": "Cannot restart the engine while recording"})
 			return
 		}
+
+		if !restartingAudio.CompareAndSwap(false, true) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Audio engine restart already in progress"})
+			return
+		}
+		defer restartingAudio.Store(false)
 
 		result, err := audioengine.RestartEngine(nil, appState, cfg)
 		if err != nil {
@@ -163,36 +172,32 @@ func streamLanguage(path string) string {
 	return language
 }
 
-// StreamHandler preserves the old URL while moving clients to the HLS stream.
 func StreamHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		language := streamLanguage(c.Request.URL.Path)
+		language := streamLanguage(c.Param("lang"))
 		target := "/api/audio/hls/" + url.PathEscape(language) + "/index.m3u8"
 		c.Redirect(http.StatusTemporaryRedirect, target)
 	}
 }
 
-// HLSPlaylistHandler serves the dynamic index.m3u8 playlist for the requested language.
 func HLSPlaylistHandler(appState *state.AppState, cfg *config.Config, publisher HLSProvider) gin.HandlerFunc {
 	logger := slog.With("component", "hls")
 	return func(c *gin.Context) {
-		language := c.Param("lang")
-		if language == cfg.AIOriginalLanguage {
-			c.Redirect(http.StatusTemporaryRedirect, "/api/audio/hls/default/index.m3u8")
-			return
-		}
-
+		language := streamLanguage(c.Param("lang"))
 		sampleRate := int(appState.Config().SampleRate())
 		if sampleRate <= 0 {
 			sampleRate = cfg.SampleRate
 		}
 
+		if language != "default" && appState.Translator == nil {
+			c.Redirect(http.StatusTemporaryRedirect, "/api/audio/hls/default/index.m3u8")
+			return
+		}
+
 		var source <-chan []float32
-		if language != "default" {
-			if appState.Translator == nil {
-				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "translation audio is unavailable"})
-				return
-			}
+		if language == "default" {
+			source = appState.PlaybackChan
+		} else {
 			source = appState.Translator.GetChannel(language)
 			if source == nil {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "translation audio is unavailable"})

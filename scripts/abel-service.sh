@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Abel Service Lifecycle Wrapper
-# Manages Docker daemon startup, Docker Compose stack, Abel binary lifecycle, and clean teardown.
+# Manages Docker daemon startup (if needed), Docker Compose stack, Abel binary lifecycle, and clean teardown.
 
 set -e
 
@@ -37,7 +37,6 @@ for p in "${CANDIDATE_PATHS[@]}"; do
     fi
 done
 
-DOCKER_STARTED_BY_ABEL=0
 COMPOSE_STARTED=0
 ABEL_PID=""
 
@@ -71,7 +70,6 @@ start_docker_daemon() {
     while [ $elapsed -lt 30 ]; do
         if is_docker_responsive; then
             echo "[abel-service] Docker daemon started successfully."
-            DOCKER_STARTED_BY_ABEL=1
             return 0
         fi
         sleep 1
@@ -80,18 +78,6 @@ start_docker_daemon() {
 
     echo "[abel-service] WARNING: Timed out waiting for Docker daemon; continuing without Docker." >&2
     return 1
-}
-
-stop_docker_daemon() {
-    if [ "$DOCKER_STARTED_BY_ABEL" -eq 1 ]; then
-        echo "[abel-service] Stopping Docker daemon..."
-        OS_TYPE="$(uname -s)"
-        if [ "$OS_TYPE" = "Darwin" ]; then
-            osascript -e 'quit app "Docker"' 2>/dev/null || true
-        elif [ "$OS_TYPE" = "Linux" ]; then
-            systemctl --user stop docker 2>/dev/null || sudo systemctl stop docker 2>/dev/null || true
-        fi
-    fi
 }
 
 cleanup() {
@@ -104,12 +90,11 @@ cleanup() {
         wait "$ABEL_PID" 2>/dev/null || true
     fi
 
+    # Stop Abel's Docker Compose services (preserves external Docker containers and daemon)
     if [ "$COMPOSE_STARTED" -eq 1 ] && [ -n "$COMPOSE_FILE" ]; then
-        echo "[abel-service] Stopping Docker Compose containers..."
+        echo "[abel-service] Stopping Docker Compose services..."
         docker compose -f "$COMPOSE_FILE" down 2>/dev/null || true
     fi
-
-    stop_docker_daemon
 
     echo "[abel-service] Teardown complete."
     exit 0

@@ -13,6 +13,10 @@ elif [ -x "$SCRIPT_DIR/abel" ]; then
     BINARY="$SCRIPT_DIR/abel"
 elif command -v abel >/dev/null 2>&1; then
     BINARY="$(command -v abel)"
+elif [ -x "/opt/local/bin/abel" ]; then
+    BINARY="/opt/local/bin/abel"
+elif [ -x "/usr/local/bin/abel" ]; then
+    BINARY="/usr/local/bin/abel"
 else
     echo "[abel-service] ERROR: Unable to locate 'abel' executable." >&2
     exit 1
@@ -23,8 +27,9 @@ COMPOSE_FILE=""
 CANDIDATE_PATHS=(
     "$ABEL_COMPOSE_FILE"
     "$SCRIPT_DIR/../share/abel/docker-compose.yaml"
-    "/opt/homebrew/share/abel/docker-compose.yaml"
+    "/opt/local/share/abel/docker-compose.yaml"
     "/usr/local/share/abel/docker-compose.yaml"
+    "/usr/share/abel/docker-compose.yaml"
     "$SCRIPT_DIR/../docker-compose.yaml"
     "$SCRIPT_DIR/docker-compose.yaml"
     "./docker-compose.yaml"

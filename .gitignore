@@ -7,3 +7,4 @@ session.key
 *.key
 cloud_drive/
 recordings/
+/bin/

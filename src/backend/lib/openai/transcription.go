@@ -39,6 +39,7 @@ type TranscriptionManager struct {
 	OnStateChange func()
 }
 
+// NewTranscriptionManager creates a live speech-to-text session manager.
 func NewTranscriptionManager(cfg *config.Config, appState *state.AppState, apiKey, model, originalLang string, audioInSize, audioOutSize, subtitleSize int) (*TranscriptionManager, error) {
 	return &TranscriptionManager{
 		Config:             cfg,

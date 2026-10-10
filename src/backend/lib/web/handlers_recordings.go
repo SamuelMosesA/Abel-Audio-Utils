@@ -169,6 +169,7 @@ func GetRecordingStatus(appState *state.AppState) gin.HandlerFunc {
 	}
 }
 
+// ListRecordingFiles enumerates saved audio recordings available for download.
 func ListRecordingFiles(cfg *config.Config) gin.HandlerFunc {
 	// @Summary List recording files
 	// @Description Returns a list of WAV files in storage

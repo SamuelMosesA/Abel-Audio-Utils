@@ -53,6 +53,7 @@ func (c *WSClient) Close() error {
 	return c.Conn.Close()
 }
 
+// RecordIntent represents active recording intent and target output parameters.
 type RecordIntent struct {
 	isRecording bool
 }
@@ -68,6 +69,7 @@ type StaticLocations struct {
 func (l StaticLocations) Storage() string    { return l.storage }
 func (l StaticLocations) CloudDrive() string { return l.cloudDrive }
 
+// AppState manages thread-safe synchronized sections of audio, system, and recording state.
 type AppState struct {
 	mu sync.RWMutex
 
@@ -92,6 +94,7 @@ type AppState struct {
 	Translator Translator
 }
 
+// NewAppState initializes thread-safe global state for Abel Audio Utils.
 func NewAppState(storage, cloud string) *AppState {
 	return &AppState{
 		static: StaticLocations{

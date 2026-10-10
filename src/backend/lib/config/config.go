@@ -14,6 +14,7 @@ type AILanguage struct {
 	Name string `yaml:"name" json:"name"`
 }
 
+// Config holds global server, audio interface, and AI streaming runtime configuration.
 type Config struct {
 	Port               string  `yaml:"port"`
 	SampleRate         int     `yaml:"sample_rate"`
@@ -63,6 +64,7 @@ func (cfg *Config) ResolveLanguageCode(name string) string {
 	return name
 }
 
+// LoadConfig parses application settings from YAML or environment variables.
 func LoadConfig(path string) (*Config, error) {
 	f, err := os.Open(path)
 	if err != nil {

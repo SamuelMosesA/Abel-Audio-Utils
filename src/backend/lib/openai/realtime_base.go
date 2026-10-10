@@ -15,11 +15,13 @@ type Event struct {
 	EventID string `json:"event_id,omitempty"`
 }
 
+// SessionUpdateEvent configures Realtime session parameters upon initial connection.
 type SessionUpdateEvent struct {
 	Type    string        `json:"type"`
 	Session SessionConfig `json:"session"`
 }
 
+// SessionConfig details the audio format, modalities, and instructions for Realtime AI.
 type SessionConfig struct {
 	Type              string       `json:"type,omitempty"`
 	Modalities        []string     `json:"modalities,omitempty"`
@@ -30,17 +32,20 @@ type SessionConfig struct {
 	Audio             *AudioConfig `json:"audio,omitempty"`
 }
 
+// AudioConfig sets input and output audio streaming parameters for OpenAI Realtime.
 type AudioConfig struct {
 	Input  *InputConfig  `json:"input,omitempty"`
 	Output *OutputConfig `json:"output,omitempty"`
 }
 
+// InputConfig specifies input format and transcription parameters.
 type InputConfig struct {
 	Format        *InputFormat         `json:"format,omitempty"`
 	Transcription *TranscriptionConfig `json:"transcription,omitempty"`
 	TurnDetection *TurnDetectionConfig `json:"turn_detection,omitempty"`
 }
 
+// TurnDetectionConfig configures voice activity detection (VAD) thresholds.
 type TurnDetectionConfig struct {
 	Type              string  `json:"type,omitempty"`
 	Threshold         float64 `json:"threshold,omitempty"`
@@ -48,32 +53,38 @@ type TurnDetectionConfig struct {
 	SilenceDurationMs int     `json:"silence_duration_ms,omitempty"`
 }
 
+// InputFormat specifies audio encoding and rate for input streams.
 type InputFormat struct {
 	Type string `json:"type,omitempty"`
 	Rate int    `json:"rate,omitempty"`
 }
 
+// TranscriptionConfig defines the model and language for live speech-to-text.
 type TranscriptionConfig struct {
 	Model    string `json:"model,omitempty"`
 	Language string `json:"language,omitempty"`
 }
 
+// OutputConfig defines the synthesized speech voice and output format.
 type OutputConfig struct {
 	Format   *OutputFormat `json:"format,omitempty"`
 	Language string        `json:"language,omitempty"`
 	Voice    string        `json:"voice,omitempty"`
 }
 
+// OutputFormat specifies output audio encoding and sample rate.
 type OutputFormat struct {
 	Type string `json:"type,omitempty"`
 	Rate int    `json:"rate,omitempty"`
 }
 
+// InputAudioAppendEvent sends a base64-encoded PCM audio frame to OpenAI Realtime.
 type InputAudioAppendEvent struct {
 	Type  string `json:"type"`
 	Audio string `json:"audio"` // base64
 }
 
+// RealtimeSession represents an active concurrent connection to OpenAI Realtime API.
 type RealtimeSession struct {
 	Language     string
 	AudioIn      chan []byte 

@@ -59,6 +59,7 @@ type RecordingEntry struct {
 	Jobs         []ProcessingJob   `json:"jobs"`
 }
 
+// RecordingProcessor coordinates post-processing, trimming, MP3 conversion, and cloud delivery.
 type RecordingProcessor struct {
 	cfg              *config.Config
 	mu               sync.RWMutex

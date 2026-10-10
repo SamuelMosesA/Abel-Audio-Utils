@@ -43,6 +43,7 @@ type TranslationManager struct {
 	endpoint string // overrides the OpenAI realtime URL (tests)
 }
 
+// NewTranslationManager creates a live multilingual speech translation session manager.
 func NewTranslationManager(cfg *config.Config, appState *state.AppState, apiKey, model, voice, originalLang string, audioInSize, audioOutSize, subtitleSize int) (*TranslationManager, error) {
 	return &TranslationManager{
 		Config:             cfg,

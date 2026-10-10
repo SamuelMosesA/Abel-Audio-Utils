@@ -1,5 +1,6 @@
 package state
 
+// InterfaceConfig holds audio interface channel selection, digital gain, and sample rate.
 type InterfaceConfig struct {
 	deviceID   int32
 	chL        int32

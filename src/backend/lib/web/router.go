@@ -18,6 +18,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
+// NewRouter constructs the Gin HTTP engine with authenticated admin routes and public endpoints.
 func NewRouter(appState *state.AppState, cfg *config.Config, hlsPublisher *audioengine.HLSPublisher, staticFiles embed.FS) *gin.Engine {
 	processor := NewRecordingProcessor(cfg)
 	// Switch from default to release mode by default, standard logger in gin is noisy

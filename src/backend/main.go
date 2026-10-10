@@ -34,15 +34,29 @@ func main() {
 
 	logger.Info("Starting Abel...")
 
+	var candidatePaths []string
 	home, err := os.UserHomeDir()
-	if err != nil {
-		logger.Error("Could not determine user home directory", slog.Any("error", err))
-		os.Exit(1)
+	if err == nil {
+		candidatePaths = append(candidatePaths, filepath.Join(home, ".config", "abel", "config.yaml"))
+	}
+	candidatePaths = append(candidatePaths,
+		"/etc/abel/config.yaml",
+		"/opt/local/etc/abel/config.yaml",
+		"/usr/local/etc/abel/config.yaml",
+		"config/config.yaml",
+	)
+
+	var resolvedPath string
+	for _, p := range candidatePaths {
+		if _, err := os.Stat(p); err == nil {
+			resolvedPath = p
+			break
+		}
 	}
 
-	resolvedPath := filepath.Join(home, ".config", "abel", "config.yaml")
-	if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
-		logger.Error("Configuration file not found. Only configuration from ~/.config/abel/config.yaml is allowed.", slog.String("expected_path", resolvedPath))
+	if resolvedPath == "" {
+		expectedPath := filepath.Join(home, ".config", "abel", "config.yaml")
+		logger.Error("Configuration file not found. Checked ~/.config/abel/config.yaml and /etc/abel/config.yaml.", slog.String("expected_path", expectedPath))
 		os.Exit(1)
 	}
 

@@ -114,7 +114,7 @@ start_docker_daemon() {
 }
 
 cleanup() {
-    trap - SIGTERM SIGINT SIGHUP EXIT
+    trap - SIGTERM SIGINT SIGHUP
     echo "[abel-service] Initiating graceful shutdown..."
 
     if [ -n "$ABEL_PID" ] && kill -0 "$ABEL_PID" 2>/dev/null; then
@@ -133,7 +133,7 @@ cleanup() {
     exit 0
 }
 
-trap cleanup SIGTERM SIGINT SIGHUP EXIT
+trap cleanup SIGTERM SIGINT SIGHUP
 
 # 1. Manage Docker and Docker Compose
 if command -v docker >/dev/null 2>&1; then
@@ -160,4 +160,7 @@ echo "[abel-service] Starting Abel binary: $BINARY"
 "$BINARY" "$@" &
 ABEL_PID=$!
 
-wait "$ABEL_PID"
+EXIT_CODE=0
+wait "$ABEL_PID" || EXIT_CODE=$?
+echo "[abel-service] Abel binary exited with status $EXIT_CODE"
+exit "$EXIT_CODE"

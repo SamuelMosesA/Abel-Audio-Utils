@@ -54,51 +54,11 @@ func GetLocalIP() string {
 	return "127.0.0.1"
 }
 
-// ParseDarwinSSID extracts the Wi-Fi SSID from macOS ipconfig getsummary output.
-func ParseDarwinSSID(out string) string {
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "SSID : ") {
-			parts := strings.SplitN(trimmed, "SSID : ", 2)
-			if len(parts) == 2 {
-				ssid := strings.TrimSpace(parts[1])
-				if ssid != "" {
-					return ssid
-				}
-			}
-		}
-	}
-	return ""
-}
-
 // GetWiFiSSID queries the active Wi-Fi SSID using platform utilities.
-// On macOS: runs `ipconfig getsummary en0` with en1 fallback and airport fallback.
 // On Linux: runs `nmcli -t -f active,ssid dev wifi`.
+// On macOS: Wi-Fi SSIDs are redacted by the OS without Location Services entitlements, returning "N/A".
 func GetWiFiSSID() string {
-	if runtime.GOOS == "darwin" {
-		// Try ipconfig getsummary on en0 (standard Wi-Fi interface)
-		for _, iface := range []string{"en0", "en1"} {
-			cmd := exec.Command("ipconfig", "getsummary", iface)
-			if out, err := cmd.Output(); err == nil {
-				if ssid := ParseDarwinSSID(string(out)); ssid != "" {
-					return ssid
-				}
-			}
-		}
-
-		// Fallback to airport command if present
-		cmd := exec.Command("/System/Library/PrivateFrameworks/Apple80211.framework/Resources/airport", "-I")
-		if out, err := cmd.Output(); err == nil {
-			lines := strings.Split(string(out), "\n")
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "SSID: ") {
-					return strings.TrimPrefix(line, "SSID: ")
-				}
-			}
-		}
-	} else if runtime.GOOS == "linux" {
+	if runtime.GOOS == "linux" {
 		cmd := exec.Command("nmcli", "-t", "-f", "active,ssid", "dev", "wifi")
 		if out, err := cmd.Output(); err == nil {
 			lines := strings.Split(string(out), "\n")

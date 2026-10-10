@@ -55,18 +55,3 @@ func TestGetSystemConnection(t *testing.T) {
 	assert.Equal(t, resp.Host+":8080", resp.DisplayEndpoint)
 	assert.NotEmpty(t, resp.SSID)
 }
-
-func TestParseDarwinSSID(t *testing.T) {
-	sampleOutput := `
-en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
-	ether 3c:22:fb:11:22:33
-	inet 192.168.1.100 netmask 0xffffff00 broadcast 192.168.1.255
-	BSSID : a0:b1:c2:d3:e4:f5
-	SSID : Church_Auditorium_5G
-	Channel : 36
-`
-	ssid := ParseDarwinSSID(sampleOutput)
-	assert.Equal(t, "Church_Auditorium_5G", ssid)
-
-	assert.Empty(t, ParseDarwinSSID("no ssid here"))
-}

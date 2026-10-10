@@ -165,10 +165,10 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	cfg.OpenAIAPIKey = strings.TrimSpace(cfg.OpenAIAPIKey)
 	if cfg.OpenAITranslateModel == "" {
-		cfg.OpenAITranslateModel = "gpt-4o-realtime-preview"
+		cfg.OpenAITranslateModel = "gpt-realtime-translate"
 	}
 	if cfg.OpenAITranscribeModel == "" {
-		cfg.OpenAITranscribeModel = "gpt-4o-realtime-preview"
+		cfg.OpenAITranscribeModel = "gpt-realtime-whisper"
 	}
 	if cfg.OpenAIVoice == "" {
 		cfg.OpenAIVoice = "alloy"

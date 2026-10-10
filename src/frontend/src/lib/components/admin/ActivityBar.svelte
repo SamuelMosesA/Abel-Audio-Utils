@@ -14,12 +14,12 @@
 
 <div class="flex flex-col gap-1 {className}">
   {#if label}
-    <div class="flex justify-between text-xxs uppercase font-bold text-muted-foreground">
+    <div class="flex justify-between text-xs font-medium text-muted-foreground">
       <span>{label}</span>
       <span>{Math.round(percent)}%</span>
     </div>
   {/if}
-  <div class="h-2 w-full bg-secondary rounded-full overflow-hidden border border-border/50">
+  <div class="h-2 w-full bg-secondary rounded-full overflow-hidden border border-border/40">
     <div 
       class="h-full {colorClass} transition-all duration-75" 
       style="width: {percent}%"

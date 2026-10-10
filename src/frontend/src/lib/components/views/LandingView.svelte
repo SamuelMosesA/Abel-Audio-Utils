@@ -6,7 +6,7 @@
   import LanguageSelector from "$lib/components/ai/LanguageSelector.svelte";
   import LiveAudioPlayer from "$lib/components/audio/LiveAudioPlayer.svelte";
   import { goto } from "$app/navigation";
-  import { Globe, ArrowRight, QrCode, Volume2, Waves } from "lucide-svelte";
+  import { Globe, ArrowRight, QrCode, Volume2, Wifi } from "lucide-svelte";
   import { onMount } from "svelte";
   import QRCode from "qrcode";
 
@@ -21,7 +21,6 @@
   }
 
   onMount(async () => {
-    // Fetch system connection info
     try {
       const res = await fetch("/api/system/connection");
       if (res.ok) {
@@ -35,11 +34,11 @@
     try {
       const url = window.location.href;
       qrCodeDataUrl = await QRCode.toDataURL(url, {
-        margin: 2,
-        scale: 8,
+        margin: 1,
+        scale: 6,
         color: {
-          dark: '#ffffff',
-          light: '#00000000'
+          dark: '#000000',
+          light: '#ffffff'
         }
       });
     } catch (err) {
@@ -48,62 +47,45 @@
   });
 </script>
 
-<header class="flex items-center justify-between mb-12 border-b border-border/40 pb-6">
-  <div class="flex items-center gap-3">
-    <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center font-black text-primary">
-      AV
-    </div>
-    <div>
-      <h1 class="text-xl font-bold tracking-tight">Audio Proxy</h1>
-      <p class="text-xxs font-black uppercase tracking-widest text-muted-foreground">Broadcast Interface</p>
-    </div>
+<div class="space-y-8">
+  <div class="space-y-1">
+    <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Audio Proxy Broadcast</h1>
+    <p class="text-sm text-muted-foreground">
+      Listen to real-time low-latency audio feeds with AI-assisted translation and subtitles.
+    </p>
   </div>
-  <div class="flex items-center gap-3">
-    <Button variant="ghost" size="sm" onclick={() => goto("/login")}>
-      Admin
-    </Button>
-  </div>
-</header>
 
-<div class="max-w-4xl mx-auto py-12 px-6 space-y-12">
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-    <!-- AI Accessibility Section -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- AI Translation Section -->
     <div class="lg:col-span-2">
-      <Card title="AI Live Translation & Accessibility">
+      <Card 
+        title="AI Live Translation & Accessibility"
+        description="Select your preferred language to listen to translated audio and follow real-time subtitles."
+      >
         <div class="space-y-6">
-          <div class="flex items-center gap-4">
-            <div class="p-3 bg-secondary text-secondary-foreground rounded-full">
-              <Globe class="w-6 h-6" />
-            </div>
-            <div>
-              <h2 class="text-xl font-bold">Real-time Translation</h2>
-              <p class="text-muted-foreground text-sm">Select your language to hear and read live AI-generated translations.</p>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
             <div class="space-y-2">
-              <span class="text-xs font-bold uppercase text-muted-foreground ml-1">Choose Language</span>
+              <label for="lang-select" class="text-xs font-medium text-muted-foreground">Select Language</label>
               <LanguageSelector 
                 selected={selectedLang} 
                 onchange={(val: string) => selectedLang = val} 
               />
             </div>
-            <div class="flex flex-col gap-2">
+            <div>
               <Button 
-                variant="secondary" 
+                variant="primary" 
                 disabled={!selectedLang} 
                 onclick={goToAILiveAudio}
                 class="w-full"
               >
-                Join AI Stream <ArrowRight class="ml-2 w-4 h-4" />
+                Join AI Stream <ArrowRight class="w-4 h-4 ml-1" />
               </Button>
             </div>
           </div>
           
-          <div class="p-4 bg-muted/20 rounded-lg border border-border">
-            <p class="text-xs text-muted-foreground italic">
-              * Subtitles and dedicated audio streams are automatically enabled for all AI-assisted feeds.
+          <div class="p-3 bg-muted/40 rounded-md border border-border/60">
+            <p class="text-xs text-muted-foreground">
+              Subtitles and dedicated low-latency audio streams are automatically generated for all supported feeds.
             </p>
           </div>
         </div>
@@ -111,67 +93,53 @@
     </div>
 
     <!-- Scan to Join Section -->
-    <Card title="Scan to Join">
-      <div class="flex flex-col items-center justify-center space-y-6 py-4">
-        <div class="relative group">
-          <div class="absolute -inset-1 bg-gradient-to-r from-primary to-secondary rounded-xl blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
-          <div class="relative bg-black rounded-lg p-2 border border-white/10">
-            {#if qrCodeDataUrl}
-              <img src={qrCodeDataUrl} alt="Join QR Code" class="w-32 h-32" />
-            {:else}
-              <div class="w-32 h-32 flex items-center justify-center bg-muted/20 rounded">
-                <QrCode class="w-8 h-8 text-muted-foreground animate-pulse" />
-              </div>
-            {/if}
-          </div>
-        </div>
-        <div class="text-center space-y-1">
-          <p class="text-xxs font-black uppercase tracking-widest text-muted-foreground">Mobile Access</p>
-          <p class="text-xs text-muted-foreground/60">Scan to open this page on your device</p>
-          {#if wifiSSID && wifiSSID !== 'N/A'}
-            <div class="pt-3 flex flex-col items-center gap-1">
-              <span class="text-tiny font-bold uppercase tracking-extra text-primary/50">Network</span>
-              <span class="text-sm font-black tracking-tight text-primary px-3 py-1 bg-primary/10 rounded-full border border-primary/20">{wifiSSID}</span>
+    <Card 
+      title="Scan to Join"
+      description="Scan with your phone camera to open on mobile."
+    >
+      <div class="flex flex-col items-center justify-center space-y-4 py-2">
+        <div class="p-2 bg-white rounded-lg border border-border shadow-sm">
+          {#if qrCodeDataUrl}
+            <img src={qrCodeDataUrl} alt="Join QR Code" class="w-32 h-32" />
+          {:else}
+            <div class="w-32 h-32 flex items-center justify-center bg-muted rounded">
+              <QrCode class="w-8 h-8 text-muted-foreground animate-pulse" />
             </div>
           {/if}
         </div>
+
+        {#if wifiSSID && wifiSSID !== 'N/A'}
+          <div class="flex items-center gap-1.5 px-3 py-1 rounded-md bg-secondary text-secondary-foreground border border-border text-xs font-medium">
+            <Wifi class="w-3.5 h-3.5 text-muted-foreground" />
+            <span>Wi-Fi: <strong class="font-semibold text-foreground">{wifiSSID}</strong></span>
+          </div>
+        {/if}
       </div>
     </Card>
 
     <!-- Direct Broadcast Section (Untranslated) -->
     <div class="lg:col-span-3">
-      <Card title="Direct Broadcast (Untranslated)">
-        <div class="flex flex-col md:flex-row items-center justify-between gap-6 p-4">
-          <div class="flex items-center gap-4 flex-1">
-            <div class="p-3 bg-primary/10 text-primary rounded-full">
-              <Volume2 class="w-6 h-6" />
+      <Card 
+        title="Direct Source Broadcast"
+        description="Listen to the original audio feed directly without translation."
+      >
+        <div class="space-y-4">
+          <div class="flex items-center gap-3">
+            <div class="p-2.5 bg-primary/10 text-primary rounded-md border border-primary/20">
+              <Volume2 class="w-5 h-5" />
             </div>
-            <div class="flex-1 space-y-3">
-              <div>
-                <h2 class="text-lg font-bold">Original Source Audio</h2>
-                <p class="text-muted-foreground text-sm">Listen to the original broadcast without AI translation or subtitles.</p>
-              </div>
-              
-              <div class="space-y-2">
-                <div class="flex items-center gap-2 text-xxs text-primary/60 font-black uppercase tracking-widest">
-                  <Waves class="w-3 h-3" />
-                  Live Stream
-                </div>
-                <LiveAudioPlayer
-                  src="/api/audio/hls/default/index.m3u8"
-                  label="Original live audio"
-                />
-              </div>
+            <div>
+              <h4 class="text-sm font-semibold text-foreground">Original Master Feed</h4>
+              <p class="text-xs text-muted-foreground">Default unprocessed broadcast stream</p>
             </div>
           </div>
+
+          <LiveAudioPlayer
+            src="/api/audio/hls/default/index.m3u8"
+            label="Original live audio"
+          />
         </div>
       </Card>
     </div>
-  </div>
-
-  <div class="pt-12 text-center text-muted-foreground/40">
-    <p class="text-xxs font-black uppercase tracking-ultra">
-      Direct Interface • Low Latency Audio Proxy • AI Assisted Access
-    </p>
   </div>
 </div>

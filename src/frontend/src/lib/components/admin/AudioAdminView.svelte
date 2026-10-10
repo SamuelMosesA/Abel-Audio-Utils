@@ -11,11 +11,8 @@
     import {
         Play,
         Square,
-        Settings,
-        Radio,
         LogOut,
         ChevronLeft,
-        Activity,
         RotateCw,
     } from "lucide-svelte";
 
@@ -81,78 +78,81 @@
     };
 </script>
 
-<div class="max-w-screen-2xl mx-auto space-y-8 py-12 px-4 animate-in fade-in duration-500">
+<div class="space-y-6">
     <!-- Header -->
-    <header class="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-8 border-b border-border/40">
-        <div class="flex items-center gap-4">
-            <div class="p-3 bg-primary/10 rounded-2xl">
-                <Activity class="w-8 h-8 text-primary" />
-            </div>
-            <div>
-                <h1 class="text-3xl font-bold tracking-tight text-white">Console Overview</h1>
-                <div class="flex items-center gap-2 mt-1">
-                    <span class="flex h-2 w-2 rounded-full {system.wsConnected ? 'bg-primary' : 'bg-destructive'}"></span>
-                    <span class="text-xxs font-black uppercase tracking-widest text-muted-foreground">
-                        {system.wsConnected ? 'WebSocket Online' : 'WebSocket Offline'}
-                    </span>
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-border/40">
+        <div>
+            <div class="flex items-center gap-3">
+                <h1 class="text-2xl font-bold tracking-tight">Audio Console</h1>
+                <div class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border {system.wsConnected ? 'border-primary/30 bg-primary/10 text-primary' : 'border-destructive/30 bg-destructive/10 text-destructive'}">
+                    <span class="w-1.5 h-1.5 rounded-full {system.wsConnected ? 'bg-primary' : 'bg-destructive'}"></span>
+                    <span>{system.wsConnected ? 'Connected' : 'Offline'}</span>
                 </div>
             </div>
+            <p class="text-sm text-muted-foreground mt-1">Configure audio interfaces, monitor levels, and manage recordings.</p>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
             <Button variant="outline" size="sm" onclick={() => goto("/")}>
-                <ChevronLeft class="w-4 h-4 mr-2" /> Return
+                <ChevronLeft class="w-4 h-4 mr-1" /> Return
             </Button>
-            <Button variant="secondary" size="sm" onclick={handleLogout}>
-                <LogOut class="w-4 h-4 mr-2" /> Sign Out
+            <Button variant="ghost" size="sm" onclick={handleLogout}>
+                <LogOut class="w-4 h-4 mr-1" /> Sign Out
             </Button>
         </div>
     </header>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <!-- Right Sidebar: Monitoring & Controls (First on mobile) -->
-        <div class="space-y-8 lg:order-2">
-            <Card title="Engine Control">
-                <div class="flex flex-col items-center gap-8 py-4">
-                    <div class="flex items-center gap-3 px-4 py-2 rounded-full border {audio.isRecording ? 'bg-destructive/10 border-destructive/20 text-destructive' : 'bg-primary/5 border-primary/20 text-primary/60'}">
-                        <span class="w-2 h-2 rounded-full {audio.isRecording ? 'bg-destructive animate-pulse' : 'bg-primary/30'}"></span>
-                        <span class="text-xxs font-black uppercase tracking-widest">
-                            {audio.isRecording ? "Recording Active" : "Standby Mode"}
-                        </span>
+        <div class="space-y-6 lg:order-2">
+            <Card 
+                title="Engine Control"
+                description="Manage live broadcast recording state."
+            >
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between p-3 rounded-md border {audio.isRecording ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-border bg-muted/20 text-muted-foreground'}">
+                        <span class="text-xs font-medium">Recording Status</span>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full {audio.isRecording ? 'bg-destructive animate-pulse' : 'bg-muted-foreground'}"></span>
+                            <span class="text-xs font-semibold uppercase">{audio.isRecording ? "Recording Active" : "Standby"}</span>
+                        </div>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-4 w-full">
+                    <div class="grid grid-cols-2 gap-3">
                         <Button 
-                            class="h-28 flex flex-col gap-2 font-black text-lg" 
+                            class="h-16 flex flex-col items-center justify-center gap-1 font-semibold text-xs" 
                             onclick={handleRecording}
                             disabled={audio.isRecording}
                         >
-                            <Play class="w-8 h-8 fill-current" />
-                            START
+                            <Play class="w-5 h-5 fill-current" />
+                            START RECORDING
                         </Button>
                         <Button 
                             variant="destructive"
-                            class="h-28 flex flex-col gap-2 font-black text-lg" 
+                            class="h-16 flex flex-col items-center justify-center gap-1 font-semibold text-xs" 
                             onclick={handleRecording}
                             disabled={!audio.isRecording}
                         >
-                            <Square class="w-8 h-8 fill-current" />
-                            STOP
+                            <Square class="w-5 h-5 fill-current" />
+                            STOP RECORDING
                         </Button>
                     </div>
                 </div>
             </Card>
 
-            <Card title="Live Monitoring">
-                <div class="space-y-6">
-                    <div class="flex items-center justify-between bg-muted/30 p-3 rounded-lg border border-border/40">
-                        <span class="text-xxs font-black uppercase tracking-widest text-muted-foreground">Monitor Audio</span>
+            <Card 
+                title="Audio Monitoring"
+                description="Real-time VU meters and signal preview."
+            >
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between p-2.5 rounded-md border border-border bg-muted/20">
+                        <span class="text-xs font-medium text-foreground">Audio Monitor Preview</span>
                         <input
                             type="checkbox"
                             checked={visuals.monitoring}
                             onchange={() => visuals.toggleMonitor()}
                             disabled={!audio.isRunning}
-                            class="w-5 h-5 accent-primary cursor-pointer"
+                            class="w-4 h-4 accent-primary cursor-pointer rounded"
                         />
                     </div>
                     <MeterPanel />
@@ -163,29 +163,17 @@
         </div>
 
         <!-- Audio Engine Config & Recordings (Second on mobile) -->
-        <div class="lg:col-span-2 space-y-8 lg:order-1">
-            <div class="space-y-2">
-                <Button
-                    variant="outline"
-                    class="w-full gap-2 font-bold"
-                    onclick={handleRestartEngine}
-                    disabled={audio.isRecording || restarting}
-                >
-                    <RotateCw class="w-4 h-4 {restarting ? 'animate-spin' : ''}" />
-                    {restarting ? "Restarting Engine..." : "Restart Engine"}
-                </Button>
-                <p class="text-xxs text-center text-muted-foreground">
-                    {audio.isRecording ? "Stop recording to restart the engine." : "Re-scans audio devices."}
-                </p>
-            </div>
-
-            <Card title="Audio Engine Configuration">
-                <div class="space-y-6">
-                    <div class="space-y-2">
-                        <label for="device-select" class="text-xxs font-black uppercase tracking-widest text-muted-foreground ml-1">Interface Device</label>
+        <div class="lg:col-span-2 space-y-6 lg:order-1">
+            <Card 
+                title="Audio Engine Configuration"
+                description="Select soundcard interface and configure routing channels."
+            >
+                <div class="space-y-4">
+                    <div class="space-y-1.5">
+                        <label for="device-select" class="text-xs font-medium text-muted-foreground">Input Audio Interface</label>
                         <select 
                             id="device-select"
-                            class="w-full bg-muted/50 border border-border rounded-lg px-4 py-3 text-sm font-bold text-white focus:ring-primary focus:border-primary disabled:opacity-50"
+                            class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
                             value={selectedDeviceValue}
                             onchange={handleDeviceChange}
                             disabled={audio.isRecording}
@@ -200,44 +188,56 @@
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
-                        <div class="space-y-2">
-                            <label for="chL-input" class="text-xxs font-black uppercase tracking-widest text-muted-foreground ml-1">Channel L</label>
+                        <div class="space-y-1.5">
+                            <label for="chL-input" class="text-xs font-medium text-muted-foreground">Channel Left</label>
                             <input 
                                 id="chL-input"
                                 type="number" 
                                 bind:value={audio.chL}
-                                class="w-full bg-muted/50 border border-border rounded-lg px-4 py-3 font-mono text-lg font-bold disabled:opacity-50"
+                                class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm font-mono shadow-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
                                 disabled={audio.isRecording}
                             />
                         </div>
-                        <div class="space-y-2">
-                            <label for="chR-input" class="text-xxs font-black uppercase tracking-widest text-muted-foreground ml-1">Channel R</label>
+                        <div class="space-y-1.5">
+                            <label for="chR-input" class="text-xs font-medium text-muted-foreground">Channel Right</label>
                             <input 
                                 id="chR-input"
                                 type="number" 
                                 bind:value={audio.chR}
-                                class="w-full bg-muted/50 border border-border rounded-lg px-4 py-3 font-mono text-lg font-bold disabled:opacity-50"
+                                class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm font-mono shadow-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
                                 disabled={audio.isRecording}
                             />
                         </div>
                     </div>
 
-                    <div class="space-y-2">
-                        <label for="boost-input" class="text-xxs font-black uppercase tracking-widest text-muted-foreground ml-1">Digital Gain Boost</label>
+                    <div class="space-y-1.5">
+                        <label for="boost-input" class="text-xs font-medium text-muted-foreground">Digital Gain Boost (dB)</label>
                         <input 
                             id="boost-input"
                             type="number" 
                             step="0.1" 
                             bind:value={audio.boost}
-                            class="w-full bg-muted/50 border border-border rounded-lg px-4 py-3 font-mono text-lg font-bold disabled:opacity-50"
+                            class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm font-mono shadow-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
                             disabled={audio.isRecording}
                         />
                     </div>
 
-                    <div class="flex justify-end pt-4">
+                    <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            class="w-full sm:w-auto"
+                            onclick={handleRestartEngine}
+                            disabled={audio.isRecording || restarting}
+                        >
+                            <RotateCw class="w-3.5 h-3.5 mr-1.5 {restarting ? 'animate-spin' : ''}" />
+                            {restarting ? "Restarting Engine..." : "Restart Engine"}
+                        </Button>
+
                         <Button 
                             onclick={handleApplySettings} 
                             disabled={audio.isRecording}
+                            size="sm"
                             class="w-full sm:w-auto"
                         >
                             Commit Configuration

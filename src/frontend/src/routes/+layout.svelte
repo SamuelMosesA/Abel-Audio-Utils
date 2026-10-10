@@ -2,7 +2,6 @@
     import "../app.css";
     import { onMount } from "svelte";
     import { AppState, setAppContext } from "$lib/audioState.svelte";
-    import { page } from "$app/state";
     import NotificationBanner from "$lib/components/ui/NotificationBanner.svelte";
 
     let { children } = $props();
@@ -45,37 +44,31 @@
 
 <NotificationBanner />
 
-<main class="min-h-screen bg-background text-foreground selection:bg-primary/30 selection:text-primary-foreground font-sans antialiased overflow-x-hidden">
-    <!-- Ambient Background Elements -->
-    <div class="fixed inset-0 overflow-hidden pointer-events-none z-0">
-        <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-ultra"></div>
-        <div class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-amber-500/5 rounded-full blur-ultra"></div>
-    </div>
-
-    <div class="relative z-10 w-full max-w-screen-2xl mx-auto px-4 py-8 md:py-16">
-        {@render children()}
-    </div>
-
-    <footer class="relative z-10 py-12 border-t border-border/20 backdrop-blur-sm mt-20">
-        <div class="max-w-screen-2xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-6 group">
-            <div class="flex items-center gap-2">
-                <div class="w-8 h-8 rounded-lg bg-muted flex items-center justify-center font-bold text-xs group-hover:bg-primary group-hover:text-primary-foreground transition-all duration-500">
+<div class="min-h-screen flex flex-col bg-background text-foreground antialiased selection:bg-primary/20 selection:text-primary">
+    <header class="sticky top-0 z-40 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div class="max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 flex h-14 items-center justify-between">
+            <a href="/" class="flex items-center gap-2.5 font-semibold text-foreground tracking-tight hover:opacity-90 transition-opacity">
+                <div class="w-7 h-7 rounded-md bg-primary/15 border border-primary/20 flex items-center justify-center font-bold text-xs text-primary">
                     AV
                 </div>
-                <div class="text-xs font-bold tracking-widest text-muted-foreground uppercase">
-                    Samuel Moses <span class="text-primary/40 mx-1">/</span> Remote Audio Engine Proxy
-                </div>
-            </div>
-            <div class="text-xxs font-medium text-muted-foreground/60 uppercase tracking-widest">
-                Built with Svelte Runes & PortAudio © 2026
-            </div>
+                <span class="text-sm font-semibold tracking-tight">Abel Audio</span>
+            </a>
+            <nav class="flex items-center gap-3">
+                <a href="/login" class="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-md hover:bg-muted/50 border border-transparent hover:border-border/40">
+                    Admin
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="flex-1 w-full max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10">
+        {@render children()}
+    </main>
+
+    <footer class="border-t border-border/40 py-6 text-center text-xs text-muted-foreground">
+        <div class="max-w-screen-xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p>Abel Audio Proxy &copy; 2026</p>
+            <p class="text-muted-foreground/60">Low Latency Audio & AI Broadcast</p>
         </div>
     </footer>
-</main>
-
-<style>
-    /* Prevent layout shifts */
-    :global(html) {
-        font-feature-settings: 'cv02', 'cv05', 'cv11', 'ss01';
-    }
-</style>
+</div>

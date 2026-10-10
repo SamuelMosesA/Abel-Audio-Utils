@@ -2,7 +2,7 @@
     import { getAppContext } from "$lib/audioState.svelte";
     const { system } = getAppContext();
     import { goto } from "$app/navigation";
-    import { Lock, AlertCircle, ChevronLeft, Loader2, Shield } from "lucide-svelte";
+    import { Lock, AlertCircle, ChevronLeft, Loader2 } from "lucide-svelte";
     import Card from "../ui/Card.svelte";
     import Button from "../ui/Button.svelte";
     import Input from "../ui/Input.svelte";
@@ -33,73 +33,68 @@
     };
 </script>
 
-<div class="max-w-lg mx-auto py-20 px-6 space-y-8 animate-in fade-in">
-    <div class="flex items-center justify-between">
+<div class="max-w-md mx-auto py-8 sm:py-16 space-y-6">
+    <div>
         <Button 
             onclick={() => goto("/")} 
             variant="ghost"
-            class="px-2 h-9 text-muted-foreground hover:text-white"
+            size="sm"
+            class="text-muted-foreground hover:text-foreground -ml-2"
         >
             <ChevronLeft class="w-4 h-4 mr-1" />
-            Back Home
+            Back to Broadcast
         </Button>
     </div>
 
-    <Card title="Administrator Access" class="glass border-primary/20 p-6 space-y-8">
+    <Card 
+        title="Admin Sign In" 
+        description="Enter credentials to configure audio devices and processing."
+    >
         <div class="space-y-4">
-            <div class="p-3 bg-primary/10 rounded-2xl w-fit">
-                <Shield class="w-10 h-10 text-primary" />
-            </div>
-            <div class="space-y-1">
-                <p class="text-muted-foreground text-sm">Secure authorization required to control the audio engine.</p>
-            </div>
-        </div>
-
-        <div class="space-y-8">
             {#if error}
-                <div class="flex items-center gap-2 p-4 bg-destructive/10 border border-destructive/20 rounded-xl text-destructive text-sm font-medium animate-in slide-in-from-top-2">
+                <div class="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm font-medium">
                     <AlertCircle class="w-4 h-4 shrink-0" />
-                    {error}
+                    <span>{error}</span>
                 </div>
             {/if}
 
-            <div class="space-y-6">
-                <div class="space-y-3">
-                    <label for="username" class="text-xxs font-black uppercase tracking-extra text-muted-foreground ml-1">Username</label>
+            <div class="space-y-4">
+                <div class="space-y-1.5">
+                    <label for="username" class="text-sm font-medium text-foreground">Username</label>
                     <Input 
                         id="username" 
                         type="text" 
                         bind:value={username} 
                         placeholder="admin"
-                        class="h-12 bg-muted/50 text-base"
+                        autocomplete="username"
                         onkeydown={(e: KeyboardEvent) => e.key === "Enter" && handleLogin()}
                     />
                 </div>
 
-                <div class="space-y-3">
-                    <label for="password" class="text-xxs font-black uppercase tracking-extra text-muted-foreground ml-1">Access Key</label>
+                <div class="space-y-1.5">
+                    <label for="password" class="text-sm font-medium text-foreground">Password</label>
                     <Input 
                         id="password" 
                         type="password" 
                         bind:value={password} 
                         placeholder="••••••••"
-                        class="h-12 bg-muted/50 text-base"
+                        autocomplete="current-password"
                         onkeydown={(e: KeyboardEvent) => e.key === "Enter" && handleLogin()}
                     />
                 </div>
             </div>
 
             <Button 
-                class="w-full h-14 font-bold uppercase tracking-widest text-xs"
+                class="w-full mt-2"
                 onclick={handleLogin}
                 disabled={isLoading}
             >
                 {#if isLoading}
-                    <Loader2 class="w-5 h-5 animate-spin mr-2" />
-                    Authenticating...
+                    <Loader2 class="w-4 h-4 animate-spin mr-2" />
+                    Signing in...
                 {:else}
-                    Unlock Audio Console
-                    <Lock class="w-4 h-4 ml-2" />
+                    <Lock class="w-4 h-4 mr-2" />
+                    Sign In
                 {/if}
             </Button>
         </div>

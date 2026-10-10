@@ -6,13 +6,12 @@
   import LanguageSelector from "$lib/components/ai/LanguageSelector.svelte";
   import LiveAudioPlayer from "$lib/components/audio/LiveAudioPlayer.svelte";
   import { goto } from "$app/navigation";
-  import { Globe, ArrowRight, QrCode, Volume2, Wifi } from "lucide-svelte";
+  import { Globe, ArrowRight, QrCode, Volume2 } from "lucide-svelte";
   import { onMount } from "svelte";
   import QRCode from "qrcode";
 
   let selectedLang = $state('');
   let qrCodeDataUrl = $state('');
-  let wifiSSID = $state('');
   let displayEndpoint = $state('');
   let serverUrl = $state('');
 
@@ -28,7 +27,6 @@
       const res = await fetch("/api/system/connection");
       if (res.ok) {
         const data = await res.json();
-        wifiSSID = data.ssid || '';
         displayEndpoint = data.displayEndpoint || '';
         serverUrl = data.serverUrl || '';
         if (data.serverUrl) {
@@ -120,13 +118,6 @@
             <span class="text-xs font-mono font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded border border-border/50">
               {displayEndpoint}
             </span>
-          </div>
-        {/if}
-
-        {#if wifiSSID && wifiSSID !== 'N/A'}
-          <div class="flex items-center gap-1.5 px-3 py-1 rounded-md bg-secondary text-secondary-foreground border border-border text-xs font-medium">
-            <Wifi class="w-3.5 h-3.5 text-muted-foreground" />
-            <span>Wi-Fi: <strong class="font-semibold text-foreground">{wifiSSID}</strong></span>
           </div>
         {/if}
       </div>

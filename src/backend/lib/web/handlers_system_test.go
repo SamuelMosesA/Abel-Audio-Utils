@@ -53,5 +53,4 @@ func TestGetSystemConnection(t *testing.T) {
 	assert.Equal(t, "8080", resp.Port)
 	assert.NotEmpty(t, resp.Host)
 	assert.Equal(t, resp.Host+":8080", resp.DisplayEndpoint)
-	assert.NotEmpty(t, resp.SSID)
 }

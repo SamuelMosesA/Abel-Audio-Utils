@@ -36,7 +36,6 @@ export interface AppStatus {
     cloudDriveLocation: string;
     translations: TranslationSession[];
     serverUrl: string;
-    ssid: string;
 }
 
 import { fetchWithSync, setUnauthorizedHandler } from "./utils/api";
@@ -206,7 +205,6 @@ export class AIStore {
 export class SystemStore {
     wsConnected = $state(false);
     serverUrl = $state("");
-    ssid = $state("");
     isAuthenticated = $state(false);
     sessionId = $state("");
 
@@ -283,7 +281,6 @@ export class SystemStore {
             if (res.ok) {
                 const conn = await res.json();
                 this.serverUrl = conn.serverUrl;
-                this.ssid = conn.ssid;
             }
         } catch (e) {
             console.error("Error syncing connection", e);

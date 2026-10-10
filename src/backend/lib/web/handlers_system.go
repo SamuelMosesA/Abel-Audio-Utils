@@ -7,69 +7,38 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-// GetLocalIP attempts to determine the primary outbound IP address of the host machine.
+// GetLocalIP returns the machine's primary non-loopback IPv4 address on the local network.
 func GetLocalIP() string {
+	// 1. Ask OS routing table for the local address used for outbound traffic
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err == nil {
 		defer conn.Close()
 		if udpAddr, ok := conn.LocalAddr().(*net.UDPAddr); ok && !udpAddr.IP.IsLoopback() {
-			return udpAddr.IP.String()
+			if ip4 := udpAddr.IP.To4(); ip4 != nil {
+				return ip4.String()
+			}
 		}
 	}
 
-	// Fallback: scan local non-loopback network interfaces
-	ifaces, err := net.Interfaces()
+	// 2. Fallback: inspect network interface addresses for first non-loopback IPv4
+	addrs, err := net.InterfaceAddrs()
 	if err == nil {
-		for _, iface := range ifaces {
-			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-				continue
-			}
-			addrs, err := iface.Addrs()
-			if err != nil {
-				continue
-			}
-			for _, addr := range addrs {
-				var ip net.IP
-				switch v := addr.(type) {
-				case *net.IPNet:
-					ip = v.IP
-				case *net.IPAddr:
-					ip = v.IP
-				}
-				if ip != nil && !ip.IsLoopback() && ip.To4() != nil {
-					return ip.String()
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+				if ip4 := ipNet.IP.To4(); ip4 != nil {
+					return ip4.String()
 				}
 			}
 		}
 	}
 
 	return "127.0.0.1"
-}
-
-// GetWiFiSSID queries the active Wi-Fi SSID using platform utilities.
-// On Linux: runs `nmcli -t -f active,ssid dev wifi`.
-// On macOS: Wi-Fi SSIDs are redacted by the OS without Location Services entitlements, returning "N/A".
-func GetWiFiSSID() string {
-	if runtime.GOOS == "linux" {
-		cmd := exec.Command("nmcli", "-t", "-f", "active,ssid", "dev", "wifi")
-		if out, err := cmd.Output(); err == nil {
-			lines := strings.Split(string(out), "\n")
-			for _, line := range lines {
-				if strings.HasPrefix(line, "yes:") {
-					return strings.TrimPrefix(line, "yes:")
-				}
-			}
-		}
-	}
-	return "N/A"
 }
 
 // ChangeLogHandler streams real-time SSE updates to connected clients.
@@ -109,13 +78,12 @@ func ChangeLogHandler(appState *state.AppState) gin.HandlerFunc {
 	}
 }
 
-// SystemConnectionResponse describes the externally reachable server connection endpoints and Wi-Fi SSID.
+// SystemConnectionResponse describes the externally reachable server connection endpoints.
 type SystemConnectionResponse struct {
 	ServerURL       string `json:"serverUrl"`
 	Host            string `json:"host"`
 	Port            string `json:"port"`
 	DisplayEndpoint string `json:"displayEndpoint"`
-	SSID            string `json:"ssid"`
 }
 
 // ResolveExternalHost returns the most suitable public/LAN IP or hostname for external clients.
@@ -152,7 +120,6 @@ func GetSystemConnection(cfg *config.Config) gin.HandlerFunc {
 			Host:            host,
 			Port:            port,
 			DisplayEndpoint: displayEndpoint,
-			SSID:            GetWiFiSSID(),
 		})
 	}
 }

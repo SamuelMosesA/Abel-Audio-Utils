@@ -56,26 +56,17 @@ Active bidirectional WebSocket session with OpenAI:
 - `cancel`: `context.CancelFunc`
 - `lastTokens`: `int64` (tracked usage tokens)
 
-#### `SessionRegistry`
-Thread-safe typed registry replacing untyped `sync.Map`:
-- `mu`: `sync.RWMutex`
-- `sessions`: `map[string]*RealtimeSession`
-- Methods:
-  - `Get(lang string) (*RealtimeSession, bool)`
-  - `Store(lang string, s *RealtimeSession)`
-  - `Delete(lang string)`
-  - `Range(fn func(lang string, s *RealtimeSession) bool)`
-  - `Count() int`
+#### Generic Typed Maps via `github.com/zolstein/sync-map`
+Replaces untyped `sync.Map` instances across managers:
+- `Sessions`: `sync_map.Map[string, *RealtimeSession]`
+- `Subscribers`: `sync_map.Map[string, []chan string]`
+- `LastRestart`: `sync_map.Map[string, time.Time]`
 
-#### `SubscriberRegistry`
-Thread-safe typed subscriber collection replacing untyped `sync.Map`:
-- `mu`: `sync.RWMutex`
-- `subscribers`: `map[string][]chan string`
-- Methods:
-  - `Subscribe(lang string, ch chan string)`
-  - `Unsubscribe(lang string, ch chan string)`
-  - `Broadcast(lang string, message string)`
-  - `Count(lang string) int`
+Operates with compile-time type safety:
+- `m.Load(key string) (value T, ok bool)`
+- `m.Store(key string, value T)`
+- `m.Delete(key string)`
+- `m.Range(func(key string, value T) bool)`
 
 #### `PendingAudioBuffer`
 Bounded FIFO ring buffer of 24 kHz PCM chunks held during socket reconnect:

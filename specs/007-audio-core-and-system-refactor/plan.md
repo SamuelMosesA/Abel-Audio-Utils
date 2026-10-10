@@ -8,7 +8,7 @@
 
 This feature executes a comprehensive architectural consolidation and refactor across five core operational areas:
 1. **Audio Engine Core**: Consolidates WAV, HLS, and PCM clamping/conversion into a dedicated `audio_processing` package, removes inner-loop mutex locking in the single-threaded storage worker, and simplifies the engine-to-recording path for maximum manual auditability.
-2. **OpenAI Managers**: Replaces untyped `sync.Map` fields in `translation.go` and `transcription.go` with strongly typed session and subscriber registries, deduplicates broadcasting logic, simplifies connection lifecycle/auditing, and standardizes bounded FIFO audio buffering for seamless reconnects.
+2. **OpenAI Managers**: Replaces untyped `sync.Map` fields in `translation.go` and `transcription.go` with generic typed `sync_map.Map[K, V]` using `github.com/zolstein/sync-map`, deduplicates broadcasting logic, simplifies connection lifecycle/auditing, and standardizes bounded FIFO audio buffering for seamless reconnects.
 3. **Network Discovery & QR Code**: Detects macOS Wi-Fi SSID using `ipconfig getsummary en0 | awk -F ' SSID : ' '/ SSID : / {print $2}'` (with Linux fallback), determines the public/LAN-exposed IP and server port, and renders `ip:port` on the landing page QR code.
 4. **Live UI Updates & Master Refresh**: Emits real-time SSE notifications upon completion of normal and trimmed recordings, enables automatic recording list updates, and replaces fragmented card refresh buttons with a single Master Refresh button on the console header.
 5. **Code Quality & Constitution**: Audits large functions, enforces private struct field encapsulation, cleanly separates state from interface definitions, creates a Code Quality Report, and codifies principles into the project Constitution (v1.2.0).
@@ -18,7 +18,7 @@ This feature executes a comprehensive architectural consolidation and refactor a
 ## Technical Context
 
 **Language/Version**: Go 1.23+ (backend), TypeScript 5+ with Svelte 5 / SvelteKit (frontend)
-**Primary Dependencies**: PortAudio, Gin (Web & REST), Gorilla WebSocket, Lucide Svelte, qrcode
+**Primary Dependencies**: PortAudio, Gin (Web & REST), Gorilla WebSocket, `github.com/zolstein/sync-map`, Lucide Svelte, qrcode
 **Storage**: Local filesystem (`recordings/`, `cloud_drive/`) with WAV PCM audio and MP3 exports
 **Testing**: Go standard testing with `testify` (`go test -race ./src/backend/...`), Vitest for frontend (`bun run test:unit`)
 **Target Platform**: Linux and macOS (with dedicated macOS network utilities)
@@ -39,7 +39,7 @@ This feature executes a comprehensive architectural consolidation and refactor a
 
 | Principle | Compliance Assessment | Status |
 |-----------|-----------------------|--------|
-| **I. Radical Simplicity & Code Minimization** | Deletes redundant wrappers (`conversion` layer, duplicated broadcasting loops, inner-loop mutex locking, per-card UI buttons). | PASS |
+| **I. Radical Simplicity & Code Minimization** | Deletes redundant wrappers (`conversion` layer, duplicated broadcasting loops, inner-loop mutex locking, per-card UI buttons). Uses `github.com/zolstein/sync-map` instead of hand-writing custom map wrappers. | PASS |
 | **II. Streamlined & Maintainable Unit Tests** | Table-driven unit tests for PCM clamping, WAV headers, typed registries, and network detection without mocking bloat. | PASS |
 | **III. Converged Architecture & Cohesion** | Converges scattered audio conversion and streaming logic into `audio_processing`. Unifies translation and transcription WebSocket management. | PASS |
 | **IV. Hierarchical Domain Organization** | Relocates `wav.go`, `hls.go`, and PCM conversion to dedicated `audio_processing/` subpackage. | PASS |
@@ -68,11 +68,10 @@ This feature executes a comprehensive architectural consolidation and refactor a
 
 ### 2. State Encapsulation and Struct Field Protection
 - **Observed Deficiency**:
-  - `TranslationManager` and `TranscriptionManager` exposed public fields (`Sessions`, `Subscribers`, `LastRestart`, `Mu`) allowing unrestricted external map access and concurrency hazards.
-  - `AppState` had public `sync.Map` fields (`Clients`, `StreamChannels`, `BroadcastHub`, `RevokedSessions`) alongside guarded fields.
+  - `TranslationManager` and `TranscriptionManager` exposed public untyped `sync.Map` fields (`Sessions`, `Subscribers`, `LastRestart`, `Mu`) allowing unrestricted external map access and runtime panic vectors from unchecked type assertions.
 - **Architectural Remedy**:
-  - Encapsulate mutable state containers with private fields (`sessions`, `subscribers`) and expose thread-safe, domain-specific methods (`RegisterSession`, `UnregisterSession`, `AddSubscriber`, `RemoveSubscriber`).
-  - Eliminate untyped `sync.Map` casts (`v.(*RealtimeSession)`), eliminating potential runtime panic risks.
+  - Replace untyped `sync.Map` with generic `sync_map.Map[K, V]` from `github.com/zolstein/sync-map` (`sync_map.Map[string, *RealtimeSession]`, `sync_map.Map[string, []chan string]`, `sync_map.Map[string, time.Time]`).
+  - Provide domain-level thread-safe operations with zero casting overhead and zero panic vulnerabilities.
 
 ### 3. State vs. Interface Separation
 - **Observed Deficiency**:
@@ -122,11 +121,10 @@ src/backend/lib/
 │   ├── engine.go               # PortAudio capture coordinator
 │   └── storage.go              # Lock-free storage worker
 ├── openai/
-│   ├── registry.go             # Typed session and subscriber registries
 │   ├── broadcast.go            # Deduplicated subtitle broadcasting
 │   ├── buffer.go               # Resilient 15s FIFO pending audio buffer
-│   ├── translation.go          # Streamlined translation manager
-│   ├── transcription.go        # Streamlined transcription manager
+│   ├── translation.go          # Streamlined translation manager using zolstein/sync-map
+│   ├── transcription.go        # Streamlined transcription manager using zolstein/sync-map
 │   └── openai_test.go
 ├── web/
 │   ├── handlers_system.go      # External IP/port resolution & macOS en0 SSID
@@ -156,9 +154,10 @@ src/frontend/src/
 - **Phase 2: Lock-Free Audio Engine Storage Worker**
   - Refactor `storage.go` and `engine.go` to eliminate per-chunk mutex locks.
   - Simplify the engine-to-recording call graph.
-- **Phase 3: Typed OpenAI Registries & Buffering**
-  - Implement `TypedSessionMap`, `TypedSubscriberMap`, and `PendingAudioBuffer`.
+- **Phase 3: Typed OpenAI Generic Maps via `github.com/zolstein/sync-map` & Buffering**
+  - Integrate `github.com/zolstein/sync-map` for `Sessions`, `Subscribers`, and `LastRestart`.
   - Deduplicate broadcasting logic in `broadcast.go`.
+  - Standardize 15s bounded FIFO `pendingAudio` buffer.
   - Streamline `translation.go` and `transcription.go`.
 - **Phase 4: Network Discovery & QR Code Endpoint**
   - Implement macOS `ipconfig getsummary en0` SSID detection and public IP/port resolution in `handlers_system.go`.

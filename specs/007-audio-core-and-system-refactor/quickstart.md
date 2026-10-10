@@ -39,8 +39,8 @@ go test -v -race ./src/backend/lib/audioengine/...
 
 ---
 
-### Scenario 3: Typed OpenAI Session Registry & Reconnect Buffering
-Verify that `TranslationManager` and `TranscriptionManager` operate with typed session registries and keep bounded audio during socket reconnections.
+### Scenario 3: Typed OpenAI Generic Maps (`github.com/zolstein/sync-map`) & Reconnect Buffering
+Verify that `TranslationManager` and `TranscriptionManager` operate with generic typed `sync_map.Map[K, V]` and keep bounded audio during socket reconnections.
 
 ```bash
 # Run openai manager tests
@@ -48,7 +48,7 @@ go test -v -race ./src/backend/lib/openai/...
 ```
 
 **Expected Outcome**:
-- Sessions and subscriber registrations are managed through `TypedSessionMap` and `TypedSubscriberMap` without untyped `sync.Map` casts.
+- Sessions and subscriber registrations use `sync_map.Map[string, *RealtimeSession]` and `sync_map.Map[string, []chan string]` without unsafe type assertions.
 - 15-second bounded FIFO preserves pending audio during simulated WebSocket drops.
 
 ---

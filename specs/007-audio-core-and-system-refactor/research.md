@@ -46,30 +46,32 @@ This research resolves all implementation strategies for consolidating audio pro
 
 ---
 
-## Decision 3: Typed Session Registry & Resilient OpenAI Buffering
+## Decision 3: Strongly-Typed Generics via `github.com/zolstein/sync-map` & Resilient OpenAI Buffering
 
 - **Current State**:
-  - `TranslationManager` and `TranscriptionManager` each maintain untyped `sync.Map` fields: `Sessions`, `Subscribers`, and `LastRestart`.
+  - `TranslationManager` and `TranscriptionManager` each maintain untyped standard library `sync.Map` fields: `Sessions`, `Subscribers`, and `LastRestart`.
   - Both managers contain duplicated implementations of `broadcastSubtitle` and identical dial/backoff loops.
-  - Both managers have `pendingAudio` buffering, but transcription drops downsampled audio on dead sockets while translation keeps a bounded FIFO.
+  - Both managers require type assertions (`s := value.(*RealtimeSession)`, `subs := val.([]chan string)`) which risk runtime panics.
 - **Decision**:
-  - Create a shared `RealtimeRegistry` or typed session container:
+  - Adopt `github.com/zolstein/sync-map` (`sync_map.Map[K, V]`) for typed concurrent maps rather than hand-writing custom mutex wrapper types:
     ```go
-    type TypedSessionMap struct {
-        mu       sync.RWMutex
-        sessions map[string]*RealtimeSession
-    }
-    type TypedSubscriberMap struct {
-        mu          sync.RWMutex
-        subscribers map[string][]chan string
+    import sync_map "github.com/zolstein/sync-map"
+
+    type TranslationManager struct {
+        ...
+        Sessions    sync_map.Map[string, *RealtimeSession]
+        Subscribers sync_map.Map[string, []chan string]
+        LastRestart sync_map.Map[string, time.Time]
+        ...
     }
     ```
-  - Create a shared `SubtitleBroadcaster` helper that encodes JSON payloads once and safely delivers to all active subscriber channels non-blockingly.
-  - Standardize `pendingAudio` (15-second bounded FIFO of 24 kHz mono PCM16) across both managers so neither translation nor transcription loses chunks during brief API reconnections.
+  - Create a shared `SubtitleBroadcaster` helper that encodes JSON payloads once and safely delivers to all active subscriber channels non-blockingly without type assertions.
+  - Standardize `PendingAudioBuffer` (15-second bounded FIFO of 24 kHz mono PCM16) across both managers so neither translation nor transcription loses chunks during brief API reconnections.
 - **Rationale**:
-  - Completely eliminates untyped map casts (`v.(*RealtimeSession)`, `v.([]chan string)`), prevents runtime panic vectors, deduplicates ~100 lines of broadcasting boilerplate, and ensures rock-solid audio continuity.
+  - Uses a well-tested, zero-overhead generic concurrent map (`github.com/zolstein/sync-map`), directly eliminating type assertions and boilerplates without reinventing map locking primitives (conforming to Constitution Principle I: Radical Simplicity & Principle V: Zero Duplication).
 - **Alternatives Considered**:
-  - Keeping separate `sync.Map` with individual type guards: Rejected because it leaves unsafe type assertions and duplicated code across two managers.
+  - Hand-writing custom `TypedSessionMap` with `sync.RWMutex`: Rejected in favor of the user-preferred `github.com/zolstein/sync-map` library.
+  - Keeping standard library untyped `sync.Map`: Rejected because lack of compile-time type safety leads to unsafe casts and maintenance issues.
 
 ---
 

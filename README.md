@@ -42,7 +42,7 @@ Abel (anti-babel) is a high-performance, web-based audio recording, AI translati
    ```bash
    ./dev.sh
    ```
-   This script packages the source code, runs `brew install --build-from-source ./abel.rb`, sets up a config template at `~/.config/abel/config.yaml` if not present, and starts the `abel` server.
+   This script packages the source code, updates the local tap formula, and installs `abel` (using precompiled binary bottles for dependencies and building the Go app from source).
 
 ### Native Installation (Homebrew)
 

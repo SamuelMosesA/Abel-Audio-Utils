@@ -74,28 +74,19 @@ func TestResolveSessionSecret(t *testing.T) {
 		assert.Equal(t, []byte("explicit-secret-key-12345"), secret)
 	})
 
-	t.Run("Dynamic Generation and Persistence with 0600 permissions", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "config.yaml")
-		cfg := &Config{Path: cfgPath}
+	t.Run("Dynamic Ephemeral Generation per run", func(t *testing.T) {
+		cfg := &Config{}
 
-		keyPath := filepath.Join(tmpDir, "session.key")
-		assert.NoFileExists(t, keyPath)
-
-		// First call: generates and writes session.key
+		// First run generates random secret
 		secret1, err := ResolveSessionSecret(cfg)
 		require.NoError(t, err)
 		assert.Len(t, secret1, 32)
-		assert.FileExists(t, keyPath)
 
-		info, err := os.Stat(keyPath)
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
-
-		// Second call: loads exact same key (persists across restarts)
+		// Subsequent run generates distinct fresh secret to invalidate previous sessions
 		secret2, err := ResolveSessionSecret(cfg)
 		require.NoError(t, err)
-		assert.Equal(t, secret1, secret2)
+		assert.Len(t, secret2, 32)
+		assert.NotEqual(t, secret1, secret2)
 	})
 
 	t.Run("Nil config fallback", func(t *testing.T) {

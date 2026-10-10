@@ -2,7 +2,7 @@
     import { getAppContext } from "../../audioState.svelte";
     const { ai, ui } = getAppContext();
     import { goto } from "$app/navigation";
-    import { ChevronLeft, Volume2, Waves, Globe } from "lucide-svelte";
+    import { ChevronLeft, Volume2, Globe } from "lucide-svelte";
     import { onMount, tick } from "svelte";
     import { fade } from "svelte/transition";
     import Button from "../ui/Button.svelte";
@@ -131,10 +131,7 @@
                         label={`Live ${ai.resolveLanguageName(lang)} audio`}
                     />
                 {/key}
-                <div class="p-3 rounded-md bg-muted/20 border border-border/40 text-xs text-muted-foreground flex items-center gap-2">
-                    <Waves class="w-3.5 h-3.5 text-primary" />
-                    <span>Ultra-low latency HLS pipeline</span>
-                </div>
+
             </div>
 
             <!-- Subtitles Section -->

@@ -126,44 +126,18 @@ func LoadCredentials(configPath, credsPath string) map[string]string {
 
 // ResolveSessionSecret determines the cryptographic secret key used for session cookie signing.
 // If cfg.SessionSecret is configured, it is converted to bytes and returned.
-// Otherwise, it attempts to load or create a 32-byte key in session.key adjacent to cfg.Path
-// (or in ~/.config/abel/session.key) with strict 0600 file permissions.
+// Otherwise, a cryptographically secure 32-byte random key is generated dynamically in memory
+// for every run, guaranteeing that restarting the server invalidates prior sessions.
 func ResolveSessionSecret(cfg *Config) ([]byte, error) {
 	if cfg != nil && cfg.SessionSecret != "" {
 		return []byte(cfg.SessionSecret), nil
 	}
 
-	var dir string
-	if cfg != nil && cfg.Path != "" {
-		dir = filepath.Dir(cfg.Path)
-	} else {
-		userConfig, err := os.UserConfigDir()
-		if err == nil {
-			dir = filepath.Join(userConfig, "abel")
-		} else {
-			dir = "."
-		}
-	}
-
-	keyPath := filepath.Join(dir, "session.key")
-	if data, err := os.ReadFile(keyPath); err == nil && len(data) > 0 {
-		return data, nil
-	}
-
-	// Generate 32 cryptographically secure random bytes
+	// Generate fresh 32 cryptographically secure random bytes per run
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		return nil, fmt.Errorf("failed to generate random session secret: %w", err)
 	}
-
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return secret, err
-	}
-
-	if err := os.WriteFile(keyPath, secret, 0600); err != nil {
-		return secret, err
-	}
-
 	return secret, nil
 }
 

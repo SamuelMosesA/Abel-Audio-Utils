@@ -5,10 +5,10 @@
 
     const { system, ui } = getAppContext();
 
-    // Reactive check for auth changes (logout)
+    // Reactive check for auth changes (logout or initial unauthenticated visit)
     $effect(() => {
         if (!system.isAuthenticated) {
-            goto("/login");
+            goto("/login?redirect=/admin");
         }
     });
 </script>

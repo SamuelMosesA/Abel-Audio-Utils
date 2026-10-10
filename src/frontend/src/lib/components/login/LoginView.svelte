@@ -2,6 +2,8 @@
     import { getAppContext } from "$lib/audioState.svelte";
     const { system } = getAppContext();
     import { goto } from "$app/navigation";
+    import { page } from "$app/state";
+    import { resolveRedirect } from "$lib/utils/redirect";
     import { Lock, AlertCircle, ChevronLeft, Loader2 } from "lucide-svelte";
     import Card from "../ui/Card.svelte";
     import Button from "../ui/Button.svelte";
@@ -20,7 +22,8 @@
         try {
             const success = await system.login(username, password);
             if (success) {
-                goto("/admin");
+                const target = resolveRedirect(page.url.searchParams.get("redirect"));
+                goto(target);
             } else {
                 error = "Invalid administrator credentials.";
             }

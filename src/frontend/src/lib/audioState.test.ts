@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AudioStore, AIStore, SystemStore, UIStore } from './audioState.svelte';
-
+import { resolveRedirect } from './utils/redirect';
 
 describe('Modular Stores', () => {
     beforeEach(() => {
@@ -63,6 +63,27 @@ describe('Modular Stores', () => {
             vi.advanceTimersByTime(5000);
             expect(store.notification).toBeNull();
             vi.useRealTimers();
+        });
+    });
+
+    describe('Navigation and Redirects', () => {
+        it('should resolve safe internal redirects', () => {
+            expect(resolveRedirect('/admin')).toBe('/admin');
+            expect(resolveRedirect('/admin/settings')).toBe('/admin/settings');
+            expect(resolveRedirect('  /admin  ')).toBe('/admin');
+        });
+
+        it('should fallback to /admin on missing or empty redirect', () => {
+            expect(resolveRedirect(null)).toBe('/admin');
+            expect(resolveRedirect(undefined)).toBe('/admin');
+            expect(resolveRedirect('')).toBe('/admin');
+        });
+
+        it('should prevent open redirect attacks', () => {
+            expect(resolveRedirect('https://evil.com')).toBe('/admin');
+            expect(resolveRedirect('//evil.com')).toBe('/admin');
+            expect(resolveRedirect('/\\evil.com')).toBe('/admin');
+            expect(resolveRedirect('javascript:alert(1)')).toBe('/admin');
         });
     });
 });

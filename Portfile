@@ -4,7 +4,7 @@
 PortSystem          1.0
 PortGroup           github 1.0
 
-github.setup        SamuelMosesA Abel-Audio-Utils 0.2.1 v
+github.setup        SamuelMosesA Abel-Audio-Utils 2.1 v
 revision            0
 categories          audio
 platforms           darwin

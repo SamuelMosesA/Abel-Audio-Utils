@@ -183,15 +183,23 @@ export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
 sudo make install PREFIX=/usr/local
 
-# 8. Create macOS launchd daemon plist for automatic start at boot
-LAUNCHD_PLIST="/Library/LaunchDaemons/com.abel.service.plist"
-log_info "Configuring macOS launchd service at $LAUNCHD_PLIST..."
+# 8. Create macOS launchd LaunchAgent for automatic start at user login
+# Note: Installing into /Library/LaunchAgents ensures that WHICHEVER user logs in
+# (admin or standard non-admin), macOS launchd spawns Abel inside that user's GUI session.
+# This guarantees full microphone and CoreAudio permissions without needing admin rights at runtime.
+LAUNCHD_PLIST="/Library/LaunchAgents/com.abel.service.plist"
 
-sudo mkdir -p /var/log/abel
-sudo chmod 755 /var/log/abel
+log_info "Configuring macOS launchd LaunchAgent at $LAUNCHD_PLIST..."
 
-# Clean up any existing registered service to prevent error 5 (Already loaded / I/O error)
-sudo launchctl bootout system/com.abel.service 2>/dev/null || sudo launchctl unload "$LAUNCHD_PLIST" 2>/dev/null || true
+# Remove any legacy root LaunchDaemon to avoid duplicate running instances
+sudo launchctl bootout system/com.abel.service 2>/dev/null || sudo launchctl unload /Library/LaunchDaemons/com.abel.service.plist 2>/dev/null || true
+sudo rm -f /Library/LaunchDaemons/com.abel.service.plist
+
+sudo mkdir -p /Library/LaunchAgents
+
+# Unload any previously running user instance
+CURRENT_UID="$(id -u "${SUDO_USER:-$USER}")"
+sudo -u "${SUDO_USER:-$USER}" launchctl bootout "gui/${CURRENT_UID}/com.abel.service" 2>/dev/null || true
 
 sudo tee "$LAUNCHD_PLIST" > /dev/null << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -209,13 +217,13 @@ sudo tee "$LAUNCHD_PLIST" > /dev/null << 'EOF'
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/var/log/abel/abel.log</string>
+    <string>/tmp/abel.log</string>
     <key>StandardErrorPath</key>
-    <string>/var/log/abel/abel.err</string>
+    <string>/tmp/abel.err</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 </dict>
 </plist>
@@ -224,21 +232,25 @@ EOF
 sudo chown root:wheel "$LAUNCHD_PLIST"
 sudo chmod 644 "$LAUNCHD_PLIST"
 
-# 9. Load launchd service
+# 9. Load launchd service in the active user's GUI session
 log_info "Starting Abel background service with launchd..."
-if ! sudo launchctl bootstrap system "$LAUNCHD_PLIST" 2>/dev/null; then
-    sudo launchctl load -w "$LAUNCHD_PLIST"
+if ! sudo -u "${SUDO_USER:-$USER}" launchctl bootstrap "gui/${CURRENT_UID}" "$LAUNCHD_PLIST" 2>/dev/null; then
+    sudo -u "${SUDO_USER:-$USER}" launchctl load -w "$LAUNCHD_PLIST" 2>/dev/null || true
 fi
 
 log_info "Installation complete!"
 echo ""
 echo "=================================================================="
-echo " Abel is installed and registered with macOS launchd."
-echo " It will automatically start whenever the Mac boots up."
+echo " Abel is installed as a system-wide LaunchAgent (/Library/LaunchAgents)."
+echo " It will automatically start whenever ANY user logs into macOS"
+echo " (both standard non-admin users and admin accounts)."
+echo ""
+echo " Note: On macOS, microphone access requires GUI user authorization."
+echo " When prompted, click 'OK' to grant microphone access."
 echo ""
 echo " Service Management:"
-echo "   View logs:   tail -f /var/log/abel/abel.log"
-echo "   Stop:        sudo launchctl bootout system/com.abel.service (or sudo launchctl unload /Library/LaunchDaemons/com.abel.service.plist)"
-echo "   Start:       sudo launchctl bootstrap system /Library/LaunchDaemons/com.abel.service.plist (or sudo launchctl load -w /Library/LaunchDaemons/com.abel.service.plist)"
-echo "   Config:      /etc/abel/config.yaml (or ~/.config/abel/config.yaml)"
+echo "   View logs:   tail -f /tmp/abel.log"
+echo "   Stop:        launchctl bootout gui/\$(id -u)/com.abel.service"
+echo "   Start:       launchctl bootstrap gui/\$(id -u) /Library/LaunchAgents/com.abel.service.plist"
+echo "   Config:      ~/.config/abel/config.yaml (or /etc/abel/config.yaml)"
 echo "=================================================================="
